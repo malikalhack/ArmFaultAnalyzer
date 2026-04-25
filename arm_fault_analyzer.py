@@ -762,11 +762,27 @@ class ARMFaultAnalyzer:
 
     def parse_hex_value(self, value_str):
         """Parse a hex string (with or without '0x' prefix) and return an integer."""
-        pass
+        ret_val = None
+        try:
+            value_str = value_str.strip()
+            if value_str.startswith('0x') or value_str.startswith('0X'):
+                ret_val = int(value_str, 16)
+            else:
+                ret_val = int(value_str, 16)
+        except ValueError:
+            ret_val = 0
+        return ret_val
 
     def identify_memory_region(self, addr):
         """
         @brief  Identify the ARM Cortex-M memory region for a given address
+
+        @details Uses the standard ARM Cortex-M memory map architecture:
+                 Code / SRAM / Peripheral / External RAM / External Device / System.
+                 STM32-specific peripheral sub-ranges are also listed.
+
+        @param[in]  addr  32-bit address to identify
+        @return     Human-readable region string
         """
         pass
 
@@ -817,6 +833,14 @@ class ARMFaultAnalyzer:
     def decode_cfsr(self, cfsr_value):
         """
         @brief  Decode CFSR register (Configurable Fault Status Register)
+
+        @details CFSR combines three fault status registers:
+                 - MMFSR [7:0]   : MemManage Fault Status Register
+                 - BFSR  [15:8]  : BusFault Status Register
+                 - UFSR  [31:16] : UsageFault Status Register
+
+        @param[in]  cfsr_value  CFSR register value (32-bit)
+        @return     List of strings with decoded fault flags
         """
         pass
 
@@ -825,6 +849,16 @@ class ARMFaultAnalyzer:
     def decode_hfsr(self, hfsr_value):
         """
         @brief  Decode HFSR register (HardFault Status Register)
+
+        @details Contains information about critical processor faults.
+                 The FORCED bit indicates escalation from a lower-priority fault
+                 (MemManage / BusFault / UsageFault).
+
+        @param[in]  hfsr_value  HFSR register value (32-bit)
+                                Bit 30: FORCED   - escalated from another fault
+                                Bit 1:  VECTTBL  - vector table bus fault
+                                Bit 31: DEBUGEVT - debug event
+        @return     List of strings with decoded fault flags
         """
         pass
 
@@ -833,6 +867,12 @@ class ARMFaultAnalyzer:
     def decode_dfsr(self, dfsr_value):
         """
         @brief  Decode DFSR register (Debug Fault Status Register)
+
+        @details Contains debug event status flags:
+                 - HALTED, BKPT, DWTTRAP, VCATCH, EXTERNAL
+
+        @param[in]  dfsr_value  DFSR register value (32-bit)
+        @return     List of strings with decoded fault flags
         """
         pass
 
@@ -841,6 +881,12 @@ class ARMFaultAnalyzer:
     def decode_afsr(self, afsr_value):
         """
         @brief  Decode AFSR register (Auxiliary Fault Status Register)
+
+        @details Implementation-defined register.
+                 Interpretation depends on the MCU vendor (ST, NXP, TI, etc.)
+
+        @param[in]  afsr_value  AFSR register value (32-bit)
+        @return     List of strings with decoded fault flags
         """
         pass
 
@@ -849,6 +895,14 @@ class ARMFaultAnalyzer:
     def decode_psr(self, psr_value):
         """
         @brief  Decode PSR register (Program Status Register)
+
+        @details Program Status Register contains:
+                 - APSR flags [31:28] : N, Z, C, V arithmetic condition flags
+                 - Exception number [8:0] : current exception/interrupt number
+                 - T bit [24] : Thumb state (must be 1 on Cortex-M)
+
+        @param[in]  psr_value  PSR register value (32-bit)
+        @return     List of strings with decoded flags
         """
         pass
 
@@ -859,8 +913,52 @@ class ARMFaultAnalyzer:
     def analyze_fault(self):
         """
         @brief  Main fault analysis entry point
+
+        @details Performs the following steps:
+                 1. Parse hex values from all input fields
+                 2. Decode all fault status registers (CFSR, HFSR, DFSR, AFSR)
+                 3. Decode PSR (Program Status Register)
+                 4. Run fault diagnosis with remediation recommendations
+                 5. Save the result to analysis history
+
+                 Output is shown in two panels:
+                 - Upper panel: decoded register bit-fields
+                 - Lower panel: fault diagnosis with problem description
         """
-        pass
+        self.decode_text.delete(1.0, tk.END)
+        self.results_text.delete(1.0, tk.END)
+
+        # Парсинг значений из полей ввода
+        registers = {}
+        for reg_name, entry in self.reg_entries.items():
+            registers[reg_name] = self.parse_hex_value(entry.get())
+
+#-------------------------------------------------------------------------------
+# ДЕКОДИРОВАНИЕ FAULT STATUS РЕГИСТРОВ
+#-------------------------------------------------------------------------------
+
+        # CFSR (Configurable Fault Status Register)
+        cfsr_decoded = self.decode_cfsr(registers['CFSR'])
+        # HFSR
+        hfsr_decoded = self.decode_hfsr(registers['HFSR'])
+        # DFSR
+        dfsr_decoded = self.decode_dfsr(registers['DFSR'])
+        # AFSR
+        afsr_decoded = self.decode_afsr(registers['AFSR'])
+        # PSR
+        psr_decoded = self.decode_psr(registers['PSR'])
+        # === ДИАГНОСТИКА ===
+        diagnosis = self.diagnose_fault(registers)
+        # Сохранение в историю
+        self.save_to_history(
+            registers,
+            cfsr_decoded,
+            hfsr_decoded,
+            dfsr_decoded,
+            afsr_decoded,
+            psr_decoded,
+            diagnosis
+        )
 
 #-------------------------------------------------------------------------------
 
@@ -870,8 +968,15 @@ class ARMFaultAnalyzer:
         """
         pass
 
+    def save_to_history(
+        self, registers, decoded_cfsr, decoded_hfsr,
+        decoded_dfsr, decoded_afsr, decoded_psr, diagnosis
+    ):
+        """Append the current analysis result to the history list and persist it."""
+        pass
+
     def on_history_select(self, event):
-        """Обработка выбора из истории"""
+        """Handle item selection in the history list box."""
         selection = self.history_listbox.curselection()
         if not selection:
             return
@@ -922,7 +1027,13 @@ class ARMFaultAnalyzer:
 
     def clear_fields(self):
         """Reset all register input fields to their default values."""
-        pass
+        defaults = {'PSR': '0x01000000'}
+        for reg_name, entry in self.reg_entries.items():
+            entry.delete(0, tk.END)
+            entry.insert(0, defaults.get(reg_name, '0x00000000'))
+
+        self.decode_text.delete(1.0, tk.END)
+        self.results_text.delete(1.0, tk.END)
 
     def load_from_file(self):
         pass
