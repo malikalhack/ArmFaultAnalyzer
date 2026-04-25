@@ -55,7 +55,130 @@ class ARMFaultAnalyzer:
         @param[in]  root  Tkinter root window object
         """
         self.root = root
+        self.root.title("ARM Cortex-M Fault Analyzer")
         self.root.geometry("1100x870")
+
+    def create_analysis_tab(self):
+        """Create the register analysis tab."""
+        pass
+
+    def create_history_tab(self):
+        """Create the history tab."""
+        pass
+
+    def create_settings_tab(self):
+        """Create the settings tab."""
+        pass
+
+    def create_help_tab(self):
+        """Create the help tab."""
+        pass
+
+    def identify_memory_region(self, addr):
+        """
+        @brief  Identify the ARM Cortex-M memory region for a given address
+        """
+        pass
+
+    def identify_magic_value(self, val):
+        """
+        @brief  Check if a value matches a known embedded magic constant
+
+        @details Recognizes common MCU magic values: stack fill patterns,
+                 IWDG/WWDG keys, debug markers, null pointer, etc.
+
+        @param[in]  val  32-bit register value
+        @return     Description string, or None if not a known constant
+        """
+        MAGIC = {
+            0x00000000: "NULL pointer",
+            0xDEADBEEF: "Debug marker (DEADBEEF)",
+            0xA5A5A5A5: "Stack fill pattern (Keil/AC6)",
+            0xCCCCCCCC: "Stack fill pattern (IAR)",
+            0x55555555: "Stack fill pattern",
+            0xFEFEFEFE: "Uninitialised heap marker",
+            0x10101010: "Initial stack frame marker (task never ran)",
+            0x11111111: "Initial stack frame marker (task never ran)",
+            0x12121212: "Initial stack frame marker (task never ran)",
+            0x33333333: "Initial stack frame marker (task never ran)",
+            0x44444444: "Initial stack frame marker (task never ran)",
+            0x66666666: "Initial stack frame marker (task never ran)",
+            0x77777777: "Initial stack frame marker (task never ran)",
+            0x88888888: "Initial stack frame marker (task never ran)",
+            0x99999999: "Initial stack frame marker (task never ran)",
+            # Ключи IWDG
+            0x00005555: "IWDG_KEY_WRITE_ACCESS (0x5555)",
+            0x0000CCCC: "IWDG_KEY_ENABLE (0xCCCC)",
+            0x0000AAAA: "IWDG_KEY_RELOAD (0xAAAA)",
+            # WWDG
+            0x0000FF00: "WWDG reset value",
+            # Ключи разблокировки Flash
+            0x45670123: "FLASH unlock key 1",
+            0xCDEF89AB: "FLASH unlock key 2",
+            # Значение сброса RCC
+            0xFFFFFFFF: "All bits set (possible uninitialized / erased Flash)",
+        }
+        return MAGIC.get(val, None)
+
+#-------------------------------------------------------------------------------
+# Decode Functions - Fault Status Registers
+#-------------------------------------------------------------------------------
+
+    def decode_cfsr(self, cfsr_value):
+        """
+        @brief  Decode CFSR register (Configurable Fault Status Register)
+        """
+        pass
+
+#-------------------------------------------------------------------------------
+
+    def decode_hfsr(self, hfsr_value):
+        """
+        @brief  Decode HFSR register (HardFault Status Register)
+        """
+        pass
+
+#-------------------------------------------------------------------------------
+
+    def decode_dfsr(self, dfsr_value):
+        """
+        @brief  Decode DFSR register (Debug Fault Status Register)
+        """
+        pass
+
+#-------------------------------------------------------------------------------
+
+    def decode_afsr(self, afsr_value):
+        """
+        @brief  Decode AFSR register (Auxiliary Fault Status Register)
+        """
+        pass
+
+#-------------------------------------------------------------------------------
+
+    def decode_psr(self, psr_value):
+        """
+        @brief  Decode PSR register (Program Status Register)
+        """
+        pass
+
+#===============================================================================
+# Основная функция анализа
+#===============================================================================
+    
+    def analyze_fault(self):
+        """
+        @brief  Main fault analysis entry point
+        """
+        pass
+
+#-------------------------------------------------------------------------------
+    
+    def diagnose_fault(self, registers):
+        """
+        @brief  Diagnose fault cause and provide remediation recommendations
+        """
+        pass
 
 ################################################################################
 #                              Точка входа                                     #
