@@ -5,7 +5,7 @@ A GUI tool for analyzing fault exceptions on ARM Cortex-M microcontrollers.
 ## Requirements
 
 - Python 3.8+
-- Standard library only
+- Standard library only (tkinter, json, os, sys) — no third-party dependencies
 
 ## Usage
 

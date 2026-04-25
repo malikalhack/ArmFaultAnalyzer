@@ -744,7 +744,21 @@ class ARMFaultAnalyzer:
 
     def create_tooltip(self, widget, text):
         """Attach a hover tooltip to a widget."""
-        pass
+        def on_enter(event):
+            tooltip = tk.Toplevel()
+            tooltip.wm_overrideredirect(True)
+            tooltip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
+            label = ttk.Label(tooltip, text=text, background="lightyellow", 
+                            relief=tk.SOLID, borderwidth=1, padding=5)
+            label.pack()
+            widget.tooltip = tooltip
+
+        def on_leave(event):
+            if hasattr(widget, 'tooltip'):
+                widget.tooltip.destroy()
+
+        widget.bind('<Enter>', on_enter)
+        widget.bind('<Leave>', on_leave)
 
     def parse_hex_value(self, value_str):
         """Parse a hex string (with or without '0x' prefix) and return an integer."""
