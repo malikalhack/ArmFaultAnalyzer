@@ -1,16 +1,33 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
- ******************************************************************************
+ *******************************************************************************
  * @file    arm_fault_analyzer.py
  * @version 0.4.0
  * @author  Anton Chernov
  * @date    04/23/2026
  * @brief   ARM Cortex-M Fault Analyzer with GUI
- * 
+ *
  * @details A tool for detailed analysis of system faults on ARM Cortex-M
  *          microcontrollers (M0/M0+/M3/M4/M7).
- ******************************************************************************
+ *
+ *          Supported fault types:
+ *          - HardFault    : critical processor fault
+ *          - MemManage    : memory protection violation (MPU)
+ *          - BusFault     : bus error (invalid address)
+ *          - UsageFault   : illegal instruction or processor state
+ *          - Debug Fault  : debug event
+ *
+ *          Analysed registers:
+ *          - R0-R3, R12, LR, PC, PSR : processor state
+ *          - CFSR  : Configurable Fault Status Register (MMFSR/BFSR/UFSR)
+ *          - HFSR  : HardFault Status Register
+ *          - DFSR  : Debug Fault Status Register
+ *          - AFSR  : Auxiliary Fault Status Register
+ *          - BFAR  : BusFault Address Register
+ *          - MMFAR : MemManage Fault Address Register
+ *
+ *******************************************************************************
 """
 
 ################################ Импорт модулей ################################
@@ -25,7 +42,7 @@ from datetime import datetime
 #                              Версия приложения                               #
 ################################################################################
 
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 
 def get_version() -> str:
     """Return the application version string."""
@@ -1418,7 +1435,7 @@ class ARMFaultAnalyzer:
     ):
         """Append the current analysis result to the history list and persist it."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
         history_entry = {
             'timestamp': timestamp,
             'registers': registers.copy(),
@@ -1494,10 +1511,80 @@ class ARMFaultAnalyzer:
         self.results_text.delete(1.0, tk.END)
 
     def load_from_file(self):
-        pass
+        """Open a file dialog and load a register dump from a JSON or text file."""
+        initial_dir = self.settings.get('default_load_path', '')
+        if not initial_dir or not os.path.exists(initial_dir):
+            initial_dir = os.getcwd()
+
+        filename = filedialog.askopenfilename(
+            title="Открыть дамп регистров",
+            initialdir=initial_dir,
+            filetypes=[("JSON files", "*.json"), ("Text files", "*.txt"), ("All files", "*.*")]
+        )
+
+        if not filename:
+            return
+
+        ret_val = None
+        try:
+            with open(filename, 'r') as f:
+                data = json.load(f)
+
+            for reg_name, value in data.items():
+                if reg_name in self.reg_entries:
+                    self.reg_entries[reg_name].delete(0, tk.END)
+                    if isinstance(value, int):
+                        self.reg_entries[reg_name].insert(0, f"0x{value:08X}")
+                    else:
+                        self.reg_entries[reg_name].insert(0, str(value))
+
+            messagebox.showinfo("Успех", "Дамп загружен из файла")
+            ret_val = True
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить файл:\n{e}")
+            ret_val = False
+
+        return ret_val
 
     def save_results(self):
-        pass
+        """Export the current analysis results to a text file."""
+        initial_dir = self.settings.get('default_save_path', '')
+        if not initial_dir or not os.path.exists(initial_dir):
+            initial_dir = os.getcwd()
+
+        filename = filedialog.asksaveasfilename(
+            title="Сохранить результаты",
+            initialdir=initial_dir,
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+
+        if not filename:
+            return
+
+        ret_val = None
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write("=== ARM Cortex-M Fault Analysis ===\n")
+                f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+
+                f.write("=== Регистры ===\n")
+                for reg_name, entry in self.reg_entries.items():
+                    f.write(f"{reg_name}: {entry.get()}\n")
+
+                f.write("\n=== Декодированные флаги ===\n")
+                f.write(self.decode_text.get(1.0, tk.END))
+
+                f.write("\n=== Диагностика ===\n")
+                f.write(self.results_text.get(1.0, tk.END))
+
+            messagebox.showinfo("Успех", "Результаты сохранены")
+            ret_val = True
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{e}")
+            ret_val = False
+
+        return ret_val
 
 ################################################################################
 #                              Точка входа                                     #
@@ -1506,6 +1593,9 @@ class ARMFaultAnalyzer:
 def main():
     """
     @brief  Application entry point.
+
+    @details Creates the Tkinter root window, instantiates ARMFaultAnalyzer
+             and starts the GUI event loop.
     """
     if not validate_py_version():
         sys.exit(1)
