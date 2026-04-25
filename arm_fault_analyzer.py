@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
- *******************************************************************************
+ ******************************************************************************
  * @file    arm_fault_analyzer.py
- * @version 1.1.0
+ * @version 1.2.0
  * @author  Anton Chernov
  * @date    04/23/2026
  * @brief   ARM Cortex-M Fault Analyzer with GUI
@@ -34,8 +34,9 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import json
-import sys
 import os
+import sys
+import subprocess
 import re
 from datetime import datetime
 
@@ -43,7 +44,7 @@ from datetime import datetime
 #                              Версия приложения                               #
 ################################################################################
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 def get_version() -> str:
     """Return the application version string."""
@@ -65,7 +66,42 @@ def validate_py_version() -> bool:
     return bool_result
 
 ################################################################################
-#                        Класс ARM Fault Analyzer                              #
+#                             Локализация                                      #
+################################################################################
+
+_strings = {}
+
+def _load_locale(lang: str) -> None:
+    """
+    Load locale strings from Locales/<lang>.json; fall back to 'ru' on error.
+    """
+    global _strings
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(base_dir, 'Locales', f'{lang}.json')
+    ret_val = False
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            _strings = json.load(f)
+        ret_val = True
+    except Exception:
+        ret_val = False
+    if not ret_val and lang != 'ru':
+        # Fallback на русский язык
+        _load_locale('ru')
+
+def t(key: str, **kwargs) -> str:
+    """Return localised string for *key*, with optional format arguments."""
+    template = _strings.get(key, key)
+    ret_val = template
+    if kwargs:
+        try:
+            ret_val = template.format(**kwargs)
+        except (KeyError, ValueError):
+            ret_val = template
+    return ret_val
+
+################################################################################
+#                        Класс ARM Fault Analyzer                             #
 ################################################################################
 
 class ARMFaultAnalyzer:
@@ -96,9 +132,17 @@ class ARMFaultAnalyzer:
             'default_load_path': '',
             'default_save_path': '',
             'recent_map_files': [],
-            'recent_json_files': []
+            'recent_json_files': [],
+            'recent_files_limit': 5,
+            'history_limit': 50,
+            'language': 'ru'
         }
         self.load_settings()
+
+        # Загрузка локали (язык берётся из конфига, по умолчанию 'ru')
+        _load_locale(self.settings.get('language', 'ru'))
+
+        self.root.title(t('app_title'))
 
         # Создание вкладок
         self.notebook = ttk.Notebook(root)
@@ -106,19 +150,19 @@ class ARMFaultAnalyzer:
 
         # Вкладка анализа
         self.analysis_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.analysis_frame, text="Анализ регистров")
+        self.notebook.add(self.analysis_frame, text=t('tab_analysis'))
 
         # Вкладка истории
         self.history_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.history_frame, text="История")
+        self.notebook.add(self.history_frame, text=t('tab_history'))
 
         # Вкладка настроек
         self.settings_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.settings_frame, text="Настройки")
+        self.notebook.add(self.settings_frame, text=t('tab_settings'))
 
         # Вкладка помощи
         self.help_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.help_frame, text="Помощь")
+        self.notebook.add(self.help_frame, text=t('tab_help'))
 
         # Инициализация UI
         self.create_analysis_tab()
@@ -127,8 +171,10 @@ class ARMFaultAnalyzer:
         self.create_help_tab()
 
         # История анализов
+        self.history_file = "arm_analyzer_history.json"
         self.analysis_history = []
         self.map_symbols = []
+        self._load_history()
 
     def create_analysis_tab(self):
         """Create the register analysis tab."""
@@ -156,7 +202,11 @@ class ARMFaultAnalyzer:
         # === ЛЕВАЯ ПАНЕЛЬ ===
 
         # Основные регистры
-        core_frame = ttk.LabelFrame(left_panel, text="Регистры процессора", padding=10)
+        core_frame = ttk.LabelFrame(
+            left_panel,
+            text=t('group_core_regs'),
+            padding=10
+        )
         core_frame.pack(fill=tk.X, pady=5)
 
         self.reg_entries = {}
@@ -182,16 +232,20 @@ class ARMFaultAnalyzer:
             self.reg_entries[reg_name] = entry
 
         # Fault Status регистры
-        fault_frame = ttk.LabelFrame(left_panel, text="Fault Status Registers", padding=10)
+        fault_frame = ttk.LabelFrame(
+            left_panel,
+            text=t('group_fault_regs'),
+            padding=10
+        )
         fault_frame.pack(fill=tk.X, pady=5)
 
         fault_regs = [
-            ("CFSR", "0x00000000", "Configurable Fault Status"),
-            ("HFSR", "0x00000000", "HardFault Status"),
-            ("DFSR", "0x00000000", "Debug Fault Status"),
-            ("AFSR", "0x00000000", "Auxiliary Fault Status"),
-            ("BFAR", "0x00000000", "BusFault Address"),
-            ("MMFAR", "0x00000000", "MemManage Fault Address"),
+            ("CFSR",  "0x00000000", t('tooltip_cfsr')),
+            ("HFSR",  "0x00000000", t('tooltip_hfsr')),
+            ("DFSR",  "0x00000000", t('tooltip_dfsr')),
+            ("AFSR",  "0x00000000", t('tooltip_afsr')),
+            ("BFAR",  "0x00000000", t('tooltip_bfar')),
+            ("MMFAR", "0x00000000", t('tooltip_mmfar')),
         ]
 
         for reg_name, default_val, tooltip in fault_regs:
@@ -203,7 +257,7 @@ class ARMFaultAnalyzer:
             entry.pack(side=tk.LEFT, padx=5)
             self.reg_entries[reg_name] = entry
 
-            # Tooltip
+            # Всплывающая подсказка
             label = ttk.Label(frame, text="?", foreground="blue", cursor="hand2")
             label.pack(side=tk.LEFT)
             self.create_tooltip(label, tooltip)
@@ -214,35 +268,29 @@ class ARMFaultAnalyzer:
 
         ttk.Button(
             btn_frame,
-            text="Анализировать",
+            text=t('btn_analyze'),
             command=self.analyze_fault
         ).pack(fill=tk.X, pady=2)
         ttk.Button(
             btn_frame,
-            text="Очистить",
+            text=t('btn_clear'),
             command=self.clear_fields
         ).pack(fill=tk.X, pady=2)
         ttk.Button(
             btn_frame,
-            text="Загрузить из файла",
+            text=t('btn_load_file'),
             command=self.load_from_file
         ).pack(fill=tk.X, pady=2)
-        self.recent_json_btn = ttk.Button(
-            btn_frame,
-            text="Недавние JSON...",
-            command=self.show_recent_json_menu
-        )
-        self.recent_json_btn.pack(fill=tk.X, pady=2)
         ttk.Button(
             btn_frame,
-            text="Сохранить результат",
+            text=t('btn_save_result'),
             command=self.save_results
         ).pack(fill=tk.X, pady=2)
 
         # MAP файл для определения функции по адресу PC
         map_frame = ttk.LabelFrame(
             left_panel,
-            text="MAP файл",
+            text=t('group_map_file'),
             padding=10
         )
         map_frame.pack(fill=tk.X, pady=5)
@@ -260,22 +308,26 @@ class ARMFaultAnalyzer:
             expand=True,
             padx=(0, 3)
         )
+        self.map_file_combo.bind(
+            '<<ComboboxSelected>>',
+            self._on_map_combo_select
+        )
 
         ttk.Button(
             map_row,
-            text="Обзор...",
+            text=t('btn_browse'),
             command=self.browse_map_file
         ).pack(side=tk.LEFT, padx=(0, 2))
         ttk.Button(
             map_row,
-            text="✕",
+            text=t('btn_clear_map'),
             command=self.clear_map_file,
             width=2
         ).pack(side=tk.LEFT)
 
         self.map_status_label = ttk.Label(
             map_frame,
-            text="Файл не загружен",
+            text=t('map_not_loaded'),
             foreground="gray"
         )
         self.map_status_label.pack(anchor=tk.W, pady=(5, 0))
@@ -285,7 +337,7 @@ class ARMFaultAnalyzer:
         # Декодированные флаги
         decode_frame = ttk.LabelFrame(
             right_panel,
-            text="Декодированные флаги",
+            text=t('group_decoded'),
             padding=5
         )
         decode_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -301,7 +353,7 @@ class ARMFaultAnalyzer:
         # Результаты анализа
         results_frame = ttk.LabelFrame(
             right_panel,
-            text="Диагностика",
+            text=t('group_diagnosis'),
             padding=5
         )
         results_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -315,7 +367,7 @@ class ARMFaultAnalyzer:
         self.results_text.pack(fill=tk.BOTH, expand=True)
         ttk.Button(
             results_frame,
-            text="Копировать диагностику",
+            text=t('btn_copy_diag'),
             command=self.copy_diagnosis
         ).pack(anchor=tk.E, pady=(3, 0))
 
@@ -352,7 +404,7 @@ class ARMFaultAnalyzer:
         # Детали выбранного анализа
         details_frame = ttk.LabelFrame(
             self.history_frame,
-            text="Детали анализа",
+            text=t('hist_details'),
             padding=5
         )
         details_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -370,12 +422,12 @@ class ARMFaultAnalyzer:
 
         ttk.Button(
             btn_frame,
-            text="Восстановить",
+            text=t('btn_restore'),
             command=self.restore_from_history
         ).pack(side=tk.LEFT, padx=2)
         ttk.Button(
             btn_frame,
-            text="Очистить историю",
+            text=t('btn_clear_hist'),
             command=self.clear_history
         ).pack(side=tk.LEFT, padx=2)
 
@@ -388,7 +440,7 @@ class ARMFaultAnalyzer:
         # Заголовок
         title_label = ttk.Label(
             main_frame,
-            text="Настройки приложения",
+            text=t('settings_title'),
             font=("Arial", 14, "bold")
         )
         title_label.pack(pady=(0, 20))
@@ -396,7 +448,7 @@ class ARMFaultAnalyzer:
         # Пути по умолчанию
         paths_frame = ttk.LabelFrame(
             main_frame,
-            text="Пути по умолчанию",
+            text=t('settings_paths'),
             padding=15
         )
         paths_frame.pack(fill=tk.X, pady=10)
@@ -406,7 +458,7 @@ class ARMFaultAnalyzer:
         load_frame.pack(fill=tk.X, pady=5)
         ttk.Label(
             load_frame,
-            text="Каталог загрузки дампов:",
+            text=t('settings_load_path'),
             width=28
         ).pack(side=tk.LEFT)
         self.load_path_entry = ttk.Entry(load_frame, width=60)
@@ -414,7 +466,7 @@ class ARMFaultAnalyzer:
         self.load_path_entry.insert(0, self.settings['default_load_path'])
         ttk.Button(
             load_frame,
-            text="Обзор...",
+            text=t('btn_browse'),
             command=lambda: self.browse_directory(self.load_path_entry)
         ).pack(side=tk.LEFT)
 
@@ -423,7 +475,7 @@ class ARMFaultAnalyzer:
         save_frame.pack(fill=tk.X, pady=5)
         ttk.Label(
             save_frame,
-            text="Каталог сохранения отчётов:",
+            text=t('settings_save_path'),
             width=28
         ).pack(side=tk.LEFT)
         self.save_path_entry = ttk.Entry(save_frame, width=60)
@@ -431,9 +483,31 @@ class ARMFaultAnalyzer:
         self.save_path_entry.insert(0, self.settings['default_save_path'])
         ttk.Button(
             save_frame,
-            text="Обзор...",
+            text=t('btn_browse'),
             command=lambda: self.browse_directory(self.save_path_entry)
         ).pack(side=tk.LEFT)
+
+        # Язык интерфейса
+        lang_frame = ttk.Frame(paths_frame)
+        lang_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(
+            lang_frame,
+            text=t('settings_language'),
+            width=28
+        ).pack(side=tk.LEFT)
+        self.lang_combo = ttk.Combobox(
+            lang_frame,
+            values=['ru', 'en'],
+            width=8,
+            state='readonly'
+        )
+        self.lang_combo.set(self.settings.get('language', 'ru'))
+        self.lang_combo.pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            lang_frame,
+            text=t('settings_restart_note'),
+            foreground='gray'
+        ).pack(side=tk.LEFT, padx=6)
 
         # Кнопки управления
         btn_frame = ttk.Frame(main_frame)
@@ -441,27 +515,74 @@ class ARMFaultAnalyzer:
 
         ttk.Button(
             btn_frame,
-            text="Сохранить настройки",
+            text=t('btn_save_settings'),
             command=self.save_settings_ui
         ).pack(side=tk.LEFT, padx=5)
         ttk.Button(
             btn_frame,
-            text="Сбросить по умолчанию",
+            text=t('btn_reset_settings'),
             command=self.reset_settings
         ).pack(side=tk.LEFT, padx=5)
 
+        # Ограничения размеров
+        limits_frame = ttk.LabelFrame(
+            main_frame,
+            text=t('settings_limits'),
+            padding=15
+        )
+        limits_frame.pack(fill=tk.X, pady=(0, 10))
+
+        lim1_frame = ttk.Frame(limits_frame)
+        lim1_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(
+            lim1_frame,
+            text=t('settings_recent_limit'),
+            width=32
+        ).pack(side=tk.LEFT)
+        self.recent_limit_spin = ttk.Spinbox(lim1_frame, from_=1, to=20, width=5)
+        self.recent_limit_spin.set(self.settings.get('recent_files_limit', 5))
+        self.recent_limit_spin.pack(side=tk.LEFT)
+        ttk.Label(
+            lim1_frame,
+            text=t('settings_recent_hint'),
+            foreground="gray"
+        ).pack(side=tk.LEFT, padx=6)
+
+        lim2_frame = ttk.Frame(limits_frame)
+        lim2_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(
+            lim2_frame,
+            text=t('settings_hist_limit'),
+            width=32
+        ).pack(side=tk.LEFT)
+        self.history_limit_spin = ttk.Spinbox(
+            lim2_frame,
+            from_=10,
+            to=500,
+            width=5
+        )
+        self.history_limit_spin.set(self.settings.get('history_limit', 50))
+        self.history_limit_spin.pack(side=tk.LEFT)
+
         # Информация о конфигурационном файле
-        info_frame = ttk.LabelFrame(main_frame, text="Информация", padding=10)
+        info_frame = ttk.LabelFrame(
+            main_frame,
+            text=t('settings_info'),
+            padding=10
+        )
         info_frame.pack(fill=tk.X, pady=(0, 10))
         ttk.Label(
             info_frame,
-            text=f"Файл настроек: {os.path.abspath(self.config_file)}",
+            text=t(
+                'settings_config_path',
+                path=os.path.abspath(self.config_file)
+            ),
             font=("Consolas", 8),
             foreground="gray"
         ).pack(anchor=tk.W)
         ttk.Label(
             info_frame,
-            text="Если пути не заданы — используются стандартные диалоги открытия/сохранения.",
+            text=t('settings_paths_hint'),
             font=("Arial", 9),
             foreground="gray"
         ).pack(anchor=tk.W, pady=(4, 0))
@@ -478,295 +599,50 @@ class ARMFaultAnalyzer:
         )
         help_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        help_content = """\
-╔══════════════════════════════════════════════════════════════╗
-║        ARM Cortex-M Fault Analyzer - Руководство             ║
-╚══════════════════════════════════════════════════════════════╝
+        lang = self.settings.get('language', 'ru')
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        help_path = os.path.join(base_dir, 'Locales', f'help_{lang}.txt')
+        # Fallback на русский, если файл для выбранного языка отсутствует
+        if not os.path.exists(help_path):
+            help_path = os.path.join(base_dir, 'Locales', 'help_ru.txt')
 
-1. ОБЩЕЕ ОПИСАНИЕ
-   ═══════════════════════════════════════════════════════════
+        help_content = ""
+        try:
+            with open(help_path, 'r', encoding='utf-8') as f:
+                help_content = f.read()
+        except Exception:
+            help_content = f"[Help file not found: {help_path}]"
 
-   Инструмент предназначен для анализа системных ошибок (fault)
-   на микроконтроллерах ARM Cortex-M (M0/M0+/M3/M4/M7).
-
-   Поддерживаемые типы fault:
-   • HardFault    - критическая ошибка
-   • MemManage    - нарушение доступа к памяти (MPU)
-   • BusFault     - ошибка шины (невалидный адрес)
-   • UsageFault   - ошибка выполнения инструкции
-   • Debug Fault  - отладочное событие
-
-2. КАК ПОЛУЧИТЬ ЗНАЧЕНИЯ РЕГИСТРОВ
-   ═══════════════════════════════════════════════════════════
-
-   Используйте паттерн naked + C-handler в обработчиках ошибок:
-
-   /* Trampoline macro - checks LR to select MSP or PSP */
-   #define FAULT_TRAMPOLINE() \\
-       __asm volatile( \\
-           "tst  lr, #4              \\n" \\
-           "ite  eq                  \\n" \\
-           "mrseq r0, msp            \\n" /* fault in Thread mode, MSP */ \\
-           "mrsne r0, psp            \\n" /* fault in Handler mode, PSP */ \\
-           "b    Common_Fault_Handler_C \\n" \\
-       )
-
-   /* Naked handlers - no compiler prologue/epilogue, trampoline only */
-   __attribute__((naked)) void HardFault_Handler(void)  { FAULT_TRAMPOLINE(); }
-   __attribute__((naked)) void BusFault_Handler(void)   { FAULT_TRAMPOLINE(); }
-   __attribute__((naked)) void MemManage_Handler(void)  { FAULT_TRAMPOLINE(); }
-
-   /* C-level handler receives the stacked frame as fault_args[] */
-   void Common_Fault_Handler_C(uint32_t *fault_args)
-   {
-       __disable_irq();
-
-       /* Registers saved automatically onto the stack by the CPU */
-       volatile uint32_t stacked_r0  = fault_args[0];
-       volatile uint32_t stacked_r1  = fault_args[1];
-       volatile uint32_t stacked_r2  = fault_args[2];
-       volatile uint32_t stacked_r3  = fault_args[3];
-       volatile uint32_t stacked_r12 = fault_args[4];
-       volatile uint32_t stacked_lr  = fault_args[5];
-       volatile uint32_t stacked_pc  = fault_args[6]; /* address of faulting instruction */
-       volatile uint32_t stacked_psr = fault_args[7];
-
-       /* Fault Status Registers (read before they are cleared) */
-       volatile uint32_t cfsr = SCB->CFSR;  /* 0xE000ED28 - MMFSR/BFSR/UFSR combined */
-       volatile uint32_t hfsr = SCB->HFSR;  /* 0xE000ED2C - bit30 FORCED = escalated  */
-       volatile uint32_t dfsr = SCB->DFSR;  /* 0xE000ED30 - debug fault status         */
-       volatile uint32_t afsr = SCB->AFSR;  /* 0xE000ED3C - implementation defined     */
-       volatile uint32_t bfar = SCB->BFAR;  /* 0xE000ED38 - valid when BFARVALID=1     */
-       volatile uint32_t mmar = SCB->MMFAR; /* 0xE000ED34 - valid when MMARVALID=1     */
-
-       /* Suppress unused-variable warnings in release builds */
-       (void)stacked_r0;  (void)stacked_r1;  (void)stacked_r2;  (void)stacked_r3;
-       (void)stacked_r12; (void)stacked_lr;  (void)stacked_pc;  (void)stacked_psr;
-       (void)cfsr; (void)hfsr; (void)dfsr; (void)afsr; (void)bfar; (void)mmar;
-       /* Set a breakpoint here, then read the volatile vars in the debugger
-          and paste the hex values into the ARM Fault Analyzer. */
-       while (1);
-   }
-
-   ИЛИ используйте отладчик (GDB, J-Link, SEGGER):
-   • Остановитесь на breakpoint в обработчике fault
-   • Считайте регистры через Memory View или команды
-
-3. ПОРЯДОК РАБОТЫ С АНАЛИЗАТОРОМ
-   ═══════════════════════════════════════════════════════════
-
-   Шаг 1: Ввод данных
-   ──────────────────
-   Введите значения регистров вручную в hex формате:
-     R0-R3, R12, LR, PC, PSR   - регистры процессора
-     CFSR, HFSR, DFSR, AFSR    - fault status регистры
-     BFAR, MMFAR               - адреса ошибок
-
-   Или загрузите из JSON файла ("Загрузить из файла").
-
-   Шаг 2: Анализ
-   ─────────────
-   Нажмите кнопку "Анализировать".
-
-   Результаты:
-   • Правая верхняя панель - декодированные флаги регистров
-   • Правая нижняя панель - диагностика с описанием проблемы
-
-   Шаг 3: Интерпретация
-   ────────────────────
-   Диагностика покажет:
-   • Тип fault (MemManage/BusFault/UsageFault/HardFault)
-   • Причину возникновения
-   • Рекомендации по устранению
-   • Адреса проблемных инструкций/данных
-
-4. ФОРМАТ JSON ДАМПА
-   ═══════════════════════════════════════════════════════════
-
-   Пример файла fault_dump.json:
-
-   {
-       "R0": "0x20000100",
-       "R1": "0x00000000",
-       "R2": "0x08001234",
-       "R3": "0xDEADBEEF",
-       "R12": "0x00000000",
-       "LR": "0x08000401",
-       "PC": "0x08002468",
-       "PSR": "0x01000000",
-       "CFSR": "0x00000082",
-       "HFSR": "0x40000000",
-       "DFSR": "0x00000000",
-       "AFSR": "0x00000000",
-       "BFAR": "0x20000100",
-       "MMFAR": "0x00000000"
-   }
-
-5. РАСШИФРОВКА РЕГИСТРОВ
-   ═══════════════════════════════════════════════════════════
-
-   PC (Program Counter)
-   ────────────────────
-   Адрес инструкции, на которой произошла ошибка.
-   Используйте .map файл для определения функции.
-
-   LR (Link Register)
-   ──────────────────
-   Адрес возврата. Может указывать на вызывающую функцию.
-
-   PSR (Program Status Register)
-   ─────────────────────────────
-   • Биты 31-28: флаги N, Z, C, V (арифметика)
-   • Биты 8-0: номер текущего exception
-   • Бит 24: Thumb bit (должен быть 1)
-
-   CFSR (Configurable Fault Status Register)
-   ─────────────────────────────────────────
-   Объединяет три регистра:
-   • MMFSR (биты 7-0)   - MemManage fault
-   • BFSR  (биты 15-8)  - BusFault
-   • UFSR  (биты 31-16) - UsageFault
-
-   HFSR (HardFault Status Register)
-   ────────────────────────────────
-   • Бит 30: FORCED - эскалация из другого fault
-   • Бит 1: VECTTBL - ошибка чтения таблицы векторов
-
-   MMFAR / BFAR
-   ────────────
-   Содержат адрес памяти, вызвавший MemManage или BusFault.
-   Валидны только если установлен флаг MMARVALID/BFARVALID.
-
-6. ТИПОВЫЕ ПРОБЛЕМЫ И РЕШЕНИЯ
-   ═══════════════════════════════════════════════════════════
-
-   Проблема: IBUSERR (Instruction bus error)
-   ─────────────────────────────────────────
-   Причина: PC указывает на невалидный адрес Flash памяти
-   Решение:
-   • Проверьте таблицу векторов прерываний
-   • Убедитесь что PC в диапазоне Flash (0x08000000+)
-   • Проверьте наличие повреждения Flash
-
-   Проблема: PRECISERR (Precise data bus error)
-   ────────────────────────────────────────────
-   Причина: Обращение к невалидному адресу памяти
-   Решение:
-   • Проверьте адрес в BFAR
-   • Проверьте указатели на NULL
-   • Проверьте выход за границы массива
-   • Проверьте адреса периферии
-
-   Проблема: UNDEFINSTR (Undefined instruction)
-   ────────────────────────────────────────────
-   Причина: Попытка выполнить неизвестную инструкцию
-   Решение:
-   • Проверьте содержимое по адресу PC в дизассемблере
-   • Возможно повреждение Flash или ошибочный переход
-
-   Проблема: UNALIGNED (Unaligned access)
-   ──────────────────────────────────────
-   Причина: Невыровненный доступ к памяти
-   Решение:
-   • Используйте __attribute__((packed)) или __packed
-   • Убедитесь что структуры выровнены правильно
-   • Проверьте приведение типов указателей
-
-   Проблема: DIVBYZERO (Division by zero)
-   ───────────────────────────────────────
-   Причина: Деление на ноль (требует включения trap)
-   Решение:
-   • Найдите код деления в районе адреса PC
-   • Добавьте проверку делителя перед делением
-
-   Проблема: MSTKERR/MUNSTKERR (Stack error)
-   ─────────────────────────────────────────
-   Причина: Переполнение стека или MPU защита
-   Решение:
-   • Увеличьте размер стека в linker script
-   • Проверьте рекурсивные вызовы
-   • Проверьте большие локальные переменные
-   • Проверьте настройки MPU
-
-7. ДОПОЛНИТЕЛЬНЫЕ ВОЗМОЖНОСТИ
-   ═══════════════════════════════════════════════════════════
-
-   История анализов
-   ────────────────
-   Все выполненные анализы сохраняются во вкладке "История".
-   Можно восстановить значения из предыдущего анализа.
-
-   Экспорт результатов
-   ───────────────────
-   Кнопка "Сохранить результат" - экспорт полного отчёта
-   в текстовый файл для документации или отправки коллегам.
-
-   Настройки путей
-   ───────────────
-   Вкладка "Настройки" позволяет задать пути по умолчанию
-   для загрузки дампов и сохранения отчётов.
-
-8. ПОЛЕЗНЫЕ ССЫЛКИ
-   ═══════════════════════════════════════════════════════════
-
-   • ARM Cortex-M Programming Guide:
-     https://developer.arm.com/documentation/
-
-   • Exception and Fault Handling:
-     ARM DDI 0403E (ARMv7-M Architecture Reference Manual)
-
-   • Fault Status Registers:
-     https://developer.arm.com/documentation/100165/
-
-9. СОВЕТЫ ПО ОТЛАДКЕ
-   ═══════════════════════════════════════════════════════════
-
-   1. Всегда проверяйте PC - это адрес проблемной инструкции
-
-   2. Используйте .map файл или objdump для определения функции:
-      arm-none-eabi-objdump -d firmware.elf | grep <PC_address>
-
-   3. При FORCED HardFault смотрите CFSR - там реальная причина
-
-   4. BFAR и MMFAR валидны только если установлены флаги
-      BFARVALID и MMARVALID соответственно
-
-   5. Включите UsageFault, BusFault, MemManage в SCB->SHCSR:
-      SCB->SHCSR |= (SCB_SHCSR_USGFAULTENA_Msk |
-                     SCB_SHCSR_BUSFAULTENA_Msk |
-                     SCB_SHCSR_MEMFAULTENA_Msk);
-
-   6. Для более точной диагностики BusFault используйте
-      precise mode (отключите write buffering если нужно)
-
-══════════════════════════════════════════════════════════════
-                    (C) 2026 ARM Fault Analyzer
-══════════════════════════════════════════════════════════════
-"""
         help_text.insert(1.0, help_content)
-        help_text.config(state=tk.DISABLED)  # Только чтение
+        help_text.config(state=tk.DISABLED)
 
         # Настройка цветовых тегов
         help_text.tag_config("header", font=("Consolas", 11, "bold"))
 
     def browse_directory(self, entry_widget):
-        """Выбор каталога"""
+        """Open a directory chooser dialog and update the entry widget."""
         directory = filedialog.askdirectory(
-            title="Выберите каталог",
+            title=t('dlg_choose_dir'),
             initialdir=entry_widget.get() if entry_widget.get() else os.getcwd()
         )
         if directory:
             entry_widget.delete(0, tk.END)
             entry_widget.insert(0, directory)
 
+    def _on_map_combo_select(self, event):
+        """Auto-load the MAP file when an item is selected from the combo box."""
+        path = self.map_file_combo.get().strip()
+        if path and os.path.exists(path):
+            self.load_map_file(path)
+
     def browse_map_file(self):
-        """Выбор MAP файла через диалог и его немедленная загрузка"""
+        """Open a file dialog to select a MAP file and load it immediately."""
         initial_dir = self.settings.get('default_load_path', '')
         if not initial_dir or not os.path.exists(initial_dir):
             initial_dir = os.getcwd()
 
         filename = filedialog.askopenfilename(
-            title="Открыть MAP файл",
+            title=t('dlg_open_map'),
             initialdir=initial_dir,
             filetypes=[("MAP files", "*.map"), ("All files", "*.*")]
         )
@@ -776,10 +652,10 @@ class ARMFaultAnalyzer:
             self.load_map_file(filename)
 
     def clear_map_file(self):
-        """Сброс загруженного MAP файла"""
+        """Clear the currently loaded MAP file."""
         self.map_file_combo.set('')
         self.map_symbols = []
-        self.map_status_label.config(text="Файл не загружен", foreground="gray")
+        self.map_status_label.config(text=t('map_not_loaded'), foreground="gray")
 
     def load_settings(self):
         """Load settings from the config file."""
@@ -797,28 +673,56 @@ class ARMFaultAnalyzer:
 
     def save_settings_ui(self):
         """Read settings from the UI controls and save them to the config file."""
+        old_lang = self.settings.get('language', 'ru')
         self.settings['default_load_path'] = self.load_path_entry.get()
         self.settings['default_save_path'] = self.save_path_entry.get()
+        self.settings['language'] = self.lang_combo.get()
+        try:
+            self.settings['recent_files_limit'] = int(self.recent_limit_spin.get())
+        except ValueError:
+            pass
+        try:
+            self.settings['history_limit'] = int(self.history_limit_spin.get())
+        except ValueError:
+            pass
 
         ret_val = None
         try:
             with open(self.config_file, 'w') as f:
                 json.dump(self.settings, f, indent=4)
-            messagebox.showinfo("Успех", "Настройки сохранены")
+            new_lang = self.settings['language']
+            if new_lang != old_lang:
+                messagebox.showinfo(t('msg_success'), t('msg_restart_required'))
+                self._restart_app()
+            else:
+                messagebox.showinfo(t('msg_success'), t('msg_settings_saved'))
             ret_val = True
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось сохранить настройки:\n{e}")
+            messagebox.showerror(t('msg_error'), t('msg_settings_error', error=e))
             ret_val = False
         return ret_val
 
     def reset_settings(self):
         """Reset all settings to their default values."""
-        if messagebox.askyesno("Подтверждение", "Сбросить настройки по умолчанию?"):
+        if messagebox.askyesno(t('dlg_confirm'), t('dlg_reset_confirm')):
             self.load_path_entry.delete(0, tk.END)
             self.save_path_entry.delete(0, tk.END)
             self.settings['default_load_path'] = ''
             self.settings['default_save_path'] = ''
-            messagebox.showinfo("Готово", "Настройки сброшены")
+            self.recent_limit_spin.set(5)
+            self.history_limit_spin.set(50)
+            self.settings['recent_files_limit'] = 5
+            self.settings['history_limit'] = 50
+            messagebox.showinfo(t('msg_success'), t('msg_settings_reset'))
+
+    def _restart_app(self):
+        """
+        @brief  Restart the application to apply new settings
+        (e.g. language change)
+        """
+        self.root.destroy()
+        subprocess.Popen([sys.executable] + sys.argv)
+        sys.exit(0)
 
     def create_tooltip(self, widget, text):
         """Attach a hover tooltip to a widget."""
@@ -826,8 +730,14 @@ class ARMFaultAnalyzer:
             tooltip = tk.Toplevel()
             tooltip.wm_overrideredirect(True)
             tooltip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
-            label = ttk.Label(tooltip, text=text, background="lightyellow", 
-                            relief=tk.SOLID, borderwidth=1, padding=5)
+            label = ttk.Label(
+                tooltip,
+                text=text,
+                background="lightyellow",
+                relief=tk.SOLID,
+                borderwidth=1,
+                padding=5
+            )
             label.pack()
             widget.tooltip = tooltip
 
@@ -870,7 +780,7 @@ class ARMFaultAnalyzer:
         self.map_symbols = []
         ret_val = False
 
-        # Patterns for both compilers
+        # Паттерны регулярных выражений для обоих форматов
         gnu_pattern = re.compile(r'^\s+(0x[0-9a-fA-F]{4,})\s+([A-Za-z_]\w+)\s*$')
         ac6_pattern = re.compile(
             r'^\s+([A-Za-z_]\w+)\s+(0x[0-9a-fA-F]{8})\s+(?:Thumb|ARM)\s+Code'
@@ -880,7 +790,7 @@ class ARMFaultAnalyzer:
             with open(path, 'r', encoding='utf-8', errors='replace') as f:
                 lines = f.readlines()
 
-            # Auto-detect format
+            # Автоопределение формата
             is_ac6 = any('Image Symbol Table' in line for line in lines)
             fmt_name = "AC6 armlink" if is_ac6 else "GNU LD"
             pattern = ac6_pattern if is_ac6 else gnu_pattern
@@ -899,12 +809,15 @@ class ARMFaultAnalyzer:
             self.map_symbols.sort(key=lambda x: x[0])
             count = len(self.map_symbols)
             self.map_status_label.config(
-                text=f"[{fmt_name}] Загружено символов: {count}",
+                text=t('map_loaded', fmt=fmt_name, count=count),
                 foreground="green"
             )
             ret_val = True
         except Exception as e:
-            self.map_status_label.config(text=f"Ошибка загрузки: {e}", foreground="red")
+            self.map_status_label.config(
+                text=t('map_load_error', error=e),
+                foreground="red"
+            )
             self.map_symbols = []
             ret_val = False
         return ret_val
@@ -914,7 +827,8 @@ class ARMFaultAnalyzer:
         @brief  Find the function name for a given PC address via binary search
 
         @details Returns the name of the function whose start address is the
-                 largest address that is <= pc (i.e., pc falls inside that function).
+                 largest address that is <= pc (i.e., pc falls inside that
+                 function).
 
         @param[in]  pc  Program Counter value (32-bit address)
         @return     Function name string, or None if not found / table empty
@@ -937,34 +851,34 @@ class ARMFaultAnalyzer:
         @brief  Identify the ARM Cortex-M memory region for a given address
 
         @details Uses the standard ARM Cortex-M memory map architecture:
-                 Code / SRAM / Peripheral / External RAM / External Device / System.
-                 STM32-specific peripheral sub-ranges are also listed.
+                 Code / SRAM / Peripheral / External RAM / External Device /
+                 System. STM32-specific peripheral sub-ranges are also listed.
 
         @param[in]  addr  32-bit address to identify
         @return     Human-readable region string
         """
-        # ARM Cortex-M generic zones
+        # Общие зоны памяти ARM Cortex-M
         REGIONS = [
-            (0x00000000, 0x1FFFFFFF, "Code region (Flash/ROM)"),
-            (0x20000000, 0x3FFFFFFF, "SRAM region"),
-            (0x40000000, 0x4FFFFFFF, "Peripheral region"),
-            (0x60000000, 0x9FFFFFFF, "External RAM region"),
-            (0xA0000000, 0xDFFFFFFF, "External Device region"),
-            (0xE0000000, 0xFFFFFFFF, "System region (SCS/DWT/ITM)"),
+            (0x00000000, 0x1FFFFFFF, t('region_code')),
+            (0x20000000, 0x3FFFFFFF, t('region_sram')),
+            (0x40000000, 0x4FFFFFFF, t('region_peripheral')),
+            (0x60000000, 0x9FFFFFFF, t('region_ext_ram')),
+            (0xA0000000, 0xDFFFFFFF, t('region_ext_dev')),
+            (0xE0000000, 0xFFFFFFFF, t('region_system')),
         ]
-        # STM32 APB/AHB sub-zones (common across most families)
+        # Подзоны STM32 APB/AHB (общие для большинства семейств)
         STM32_ZONES = [
-            (0x40000000, 0x40007FFF, "STM32 APB1"),
-            (0x40010000, 0x40017FFF, "STM32 APB2"),
-            (0x40020000, 0x4007FFFF, "STM32 AHB1 / APB3"),
-            (0x50000000, 0x5FFFFFFF, "STM32 AHB2/3 (GPIO/USB/SDMMC)"),
-            (0xE0001000, 0xE0001FFF, "DWT (Data Watchpoint)"),
-            (0xE0002000, 0xE0002FFF, "FPB (Flash Patch)"),
-            (0xE000E000, 0xE000EFFF, "SCS (NVIC/SCB/SysTick)"),
-            (0xE0040000, 0xE00FFFFF, "TPIU/ETM/CoreSight"),
+            (0x40000000, 0x40007FFF, t('region_apb1')),
+            (0x40010000, 0x40017FFF, t('region_apb2')),
+            (0x40020000, 0x4007FFFF, t('region_ahb1')),
+            (0x50000000, 0x5FFFFFFF, t('region_ahb2')),
+            (0xE0001000, 0xE0001FFF, t('region_dwt')),
+            (0xE0002000, 0xE0002FFF, t('region_fpb')),
+            (0xE000E000, 0xE000EFFF, t('region_scs')),
+            (0xE0040000, 0xE00FFFFF, t('region_tpiu')),
         ]
-        ret_val = "Unknown region"
-        # Check STM32 sub-zones first (more specific)
+        ret_val = t('region_unknown')
+        # Сначала проверяем STM32 подзоны (более специфичные)
         for start, end, name in STM32_ZONES:
             if start <= addr <= end:
                 ret_val = name
@@ -1038,7 +952,7 @@ class ARMFaultAnalyzer:
         return EXC_RETURN_MAP.get(lr, None)
 
 #-------------------------------------------------------------------------------
-# Decode Functions - Fault Status Registers
+# Функции декодирования регистров статуса ошибок
 #-------------------------------------------------------------------------------
 
     def decode_cfsr(self, cfsr_value):
@@ -1057,69 +971,67 @@ class ARMFaultAnalyzer:
 
         # MMFSR (bits 0-7) - MemManage Fault Status Register
         mmfsr = cfsr_value & 0xFF
-        ret_val.append("=== MMFSR (MemManage Fault) ===")
+        ret_val.append(t('decode_mmfsr_header'))
 
         if mmfsr & (1 << 0):
-            ret_val.append("  [!] IACCVIOL: Instruction access violation")
+            ret_val.append(t('decode_mmfsr_iaccviol'))
         if mmfsr & (1 << 1):
-            ret_val.append("  [!] DACCVIOL: Data access violation")
+            ret_val.append(t('decode_mmfsr_daccviol'))
         if mmfsr & (1 << 3):
-            ret_val.append("  [!] MUNSTKERR: MemManage fault on unstacking")
+            ret_val.append(t('decode_mmfsr_munstkerr'))
         if mmfsr & (1 << 4):
-            ret_val.append("  [!] MSTKERR: MemManage fault on stacking")
+            ret_val.append(t('decode_mmfsr_mstkerr'))
         if mmfsr & (1 << 5):
-            ret_val.append("  [!] MLSPERR: MemManage fault during FP lazy state preservation")
+            ret_val.append(t('decode_mmfsr_mlsperr'))
         if mmfsr & (1 << 7):
-            ret_val.append("  [!] MMARVALID: MMFAR contains valid address")
+            ret_val.append(t('decode_mmfsr_mmarvalid'))
 
         if mmfsr == 0:
-            ret_val.append("  [OK] No MemManage faults")
+            ret_val.append(t('decode_mmfsr_ok'))
 
         # BFSR (bits 8-15) - BusFault Status Register
         bfsr = (cfsr_value >> 8) & 0xFF
-        ret_val.append("\n=== BFSR (BusFault) ===")
+        ret_val.append("\n" + t('decode_bfsr_header'))
 
         if bfsr & (1 << 0):
-            ret_val.append("  [!] IBUSERR: Instruction bus error")
+            ret_val.append(t('decode_bfsr_ibuserr'))
         if bfsr & (1 << 1):
-            ret_val.append("  [!] PRECISERR: Precise data bus error")
+            ret_val.append(t('decode_bfsr_preciserr'))
         if bfsr & (1 << 2):
-            ret_val.append("  [!] IMPRECISERR: Imprecise data bus error")
+            ret_val.append(t('decode_bfsr_impreciserr'))
         if bfsr & (1 << 3):
-            ret_val.append("  [!] UNSTKERR: BusFault on unstacking")
+            ret_val.append(t('decode_bfsr_unstkerr'))
         if bfsr & (1 << 4):
-            ret_val.append("  [!] STKERR: BusFault on stacking")
+            ret_val.append(t('decode_bfsr_stkerr'))
         if bfsr & (1 << 5):
-            ret_val.append("  [!] LSPERR: BusFault during FP lazy state preservation")
+            ret_val.append(t('decode_bfsr_lsperr'))
         if bfsr & (1 << 7):
-            ret_val.append("  [!] BFARVALID: BFAR contains valid address")
+            ret_val.append(t('decode_bfsr_bfarvalid'))
 
         if bfsr == 0:
-            ret_val.append("  [OK] No BusFaults")
+            ret_val.append(t('decode_bfsr_ok'))
 
         # UFSR (bits 16-31) - UsageFault Status Register
         ufsr = (cfsr_value >> 16) & 0xFFFF
-        ret_val.append("\n=== UFSR (UsageFault) ===")
+        ret_val.append("\n" + t('decode_ufsr_header'))
 
         if ufsr & (1 << 0):
-            ret_val.append("  [!] UNDEFINSTR: Undefined instruction")
+            ret_val.append(t('decode_ufsr_undefinstr'))
         if ufsr & (1 << 1):
-            ret_val.append("  [!] INVSTATE: Invalid state (e.g., Thumb bit not set)")
+            ret_val.append(t('decode_ufsr_invstate'))
         if ufsr & (1 << 2):
-            ret_val.append("  [!] INVPC: Invalid PC load")
+            ret_val.append(t('decode_ufsr_invpc'))
         if ufsr & (1 << 3):
-            ret_val.append("  [!] NOCP: No coprocessor")
+            ret_val.append(t('decode_ufsr_nocp'))
         if ufsr & (1 << 8):
-            ret_val.append("  [!] UNALIGNED: Unaligned access")
+            ret_val.append(t('decode_ufsr_unaligned'))
         if ufsr & (1 << 9):
-            ret_val.append("  [!] DIVBYZERO: Division by zero")
+            ret_val.append(t('decode_ufsr_divbyzero'))
 
         if ufsr == 0:
-            ret_val.append("  [OK] No UsageFaults")
+            ret_val.append(t('decode_ufsr_ok'))
 
         return ret_val
-
-#-------------------------------------------------------------------------------
 
     def decode_hfsr(self, hfsr_value):
         """
@@ -1136,21 +1048,19 @@ class ARMFaultAnalyzer:
         @return     List of strings with decoded fault flags
         """
         ret_val = []
-        ret_val.append("=== HFSR (HardFault Status) ===")
+        ret_val.append(t('decode_hfsr_header'))
 
         if hfsr_value & (1 << 1):
-            ret_val.append("  [!] VECTTBL: BusFault on vector table read")
+            ret_val.append(t('decode_hfsr_vecttbl'))
         if hfsr_value & (1 << 30):
-            ret_val.append("  [!] FORCED: Forced HardFault (escalated from other fault)")
+            ret_val.append(t('decode_hfsr_forced'))
         if hfsr_value & (1 << 31):
-            ret_val.append("  [!] DEBUGEVT: Debug event")
+            ret_val.append(t('decode_hfsr_debugevt'))
 
         if hfsr_value == 0:
-            ret_val.append("  [OK] No HardFault")
+            ret_val.append(t('decode_hfsr_ok'))
 
         return ret_val
-
-#-------------------------------------------------------------------------------
 
     def decode_dfsr(self, dfsr_value):
         """
@@ -1163,25 +1073,23 @@ class ARMFaultAnalyzer:
         @return     List of strings with decoded fault flags
         """
         ret_val = []
-        ret_val.append("=== DFSR (Debug Fault Status) ===")
+        ret_val.append(t('decode_dfsr_header'))
 
         if dfsr_value & (1 << 0):
-            ret_val.append("  [!] HALTED: Halt request")
+            ret_val.append(t('decode_dfsr_halted'))
         if dfsr_value & (1 << 1):
-            ret_val.append("  [!] BKPT: Breakpoint")
+            ret_val.append(t('decode_dfsr_bkpt'))
         if dfsr_value & (1 << 2):
-            ret_val.append("  [!] DWTTRAP: DWT match")
+            ret_val.append(t('decode_dfsr_dwttrap'))
         if dfsr_value & (1 << 3):
-            ret_val.append("  [!] VCATCH: Vector catch triggered")
+            ret_val.append(t('decode_dfsr_vcatch'))
         if dfsr_value & (1 << 4):
-            ret_val.append("  [!] EXTERNAL: External debug request")
+            ret_val.append(t('decode_dfsr_external'))
 
         if dfsr_value == 0:
-            ret_val.append("  [OK] No debug faults")
+            ret_val.append(t('decode_dfsr_ok'))
 
         return ret_val
-
-#-------------------------------------------------------------------------------
 
     def decode_afsr(self, afsr_value):
         """
@@ -1194,17 +1102,15 @@ class ARMFaultAnalyzer:
         @return     List of strings with decoded fault flags
         """
         ret_val = []
-        ret_val.append("=== AFSR (Auxiliary Fault Status) ===")
+        ret_val.append(t('decode_afsr_header'))
 
         if afsr_value == 0:
-            ret_val.append("  [OK] No auxiliary faults")
+            ret_val.append(t('decode_afsr_ok'))
         else:
-            ret_val.append(f"  Implementation defined value: 0x{afsr_value:08X}")
-            ret_val.append("  [INFO] Interpretation depends on MCU vendor")
+            ret_val.append(t('decode_afsr_value', value=afsr_value))
+            ret_val.append(t('decode_afsr_info'))
 
         return ret_val
-
-#-------------------------------------------------------------------------------
 
     def decode_psr(self, psr_value):
         """
@@ -1219,43 +1125,43 @@ class ARMFaultAnalyzer:
         @return     List of strings with decoded flags
         """
         ret_val = []
-        ret_val.append("=== PSR (Program Status Register) ===")
+        ret_val.append(t('decode_psr_header'))
 
         # APSR флаги
-        ret_val.append("  APSR flags:")
-        ret_val.append(f"    N (Negative): {(psr_value >> 31) & 1}")
-        ret_val.append(f"    Z (Zero): {(psr_value >> 30) & 1}")
-        ret_val.append(f"    C (Carry): {(psr_value >> 29) & 1}")
-        ret_val.append(f"    V (Overflow): {(psr_value >> 28) & 1}")
-        ret_val.append(f"    Q (Saturation): {(psr_value >> 27) & 1}")
+        ret_val.append(t('decode_psr_apsr'))
+        ret_val.append(t('decode_psr_n', val=(psr_value >> 31) & 1))
+        ret_val.append(t('decode_psr_z', val=(psr_value >> 30) & 1))
+        ret_val.append(t('decode_psr_c', val=(psr_value >> 29) & 1))
+        ret_val.append(t('decode_psr_v', val=(psr_value >> 28) & 1))
+        ret_val.append(t('decode_psr_q', val=(psr_value >> 27) & 1))
 
-        # ISR number
+        # Номер текущего ISR
         isr_num = psr_value & 0x1FF
         ISR_NAMES = {
-            0:  "Thread mode (no exception)",
-            2:  "NMI",
-            3:  "HardFault",
-            4:  "MemManage",
-            5:  "BusFault",
-            6:  "UsageFault",
-            11: "SVCall",
-            12: "DebugMonitor",
-            14: "PendSV",
-            15: "SysTick",
+            0:  t('isr_thread'),
+            2:  t('isr_nmi'),
+            3:  t('isr_hardfault'),
+            4:  t('isr_memmanage'),
+            5:  t('isr_busfault'),
+            6:  t('isr_usagefault'),
+            11: t('isr_svcall'),
+            12: t('isr_debugmon'),
+            14: t('isr_pendsv'),
+            15: t('isr_systick'),
         }
         if isr_num in ISR_NAMES:
             isr_str = ISR_NAMES[isr_num]
         elif isr_num >= 16:
-            isr_str = f"IRQ{isr_num - 16}"
+            isr_str = t('decode_psr_irq', num=isr_num - 16)
         else:
-            isr_str = "Reserved"
-        ret_val.append(f"  Exception number: {isr_num} ({isr_str})")
+            isr_str = t('decode_psr_reserved')
+        ret_val.append(t('decode_psr_exception', num=isr_num, name=isr_str))
 
-        # Thumb state
+        # Состояние Thumb
         thumb = (psr_value >> 24) & 1
-        ret_val.append(f"  T (Thumb state): {thumb}")
+        ret_val.append(t('decode_psr_thumb', val=thumb))
         if thumb == 0:
-            ret_val.append("    [!] WARNING: Thumb bit not set!")
+            ret_val.append(t('decode_psr_thumb_warn'))
 
         return ret_val
 
@@ -1368,8 +1274,6 @@ class ARMFaultAnalyzer:
             diagnosis
         )
 
-#-------------------------------------------------------------------------------
-
     def diagnose_fault(self, registers):
         """
         @brief  Diagnose fault cause and provide remediation recommendations
@@ -1391,35 +1295,29 @@ class ARMFaultAnalyzer:
         pc = registers['PC']
         lr = registers['LR']
 
-        ret_val.append(('info', f"PC (адрес ошибки): 0x{pc:08X}"))
+        ret_val.append(('info', t('diag_pc', pc=pc)))
         pc_func = self.resolve_pc_to_function(pc)
         if pc_func:
-            ret_val.append((
-                'info',
-                f"  \u2192 \u0424\u0443\u043d\u043a\u0446\u0438\u044f: {pc_func}"
-            ))
-        ret_val.append(('info', f"LR (return address): 0x{lr:08X}"))
+            ret_val.append(('info', t('diag_pc_func', name=pc_func)))
+        ret_val.append(('info', t('diag_lr', lr=lr)))
         exc_return = self.decode_exc_return(lr)
         if exc_return:
-            ret_val.append(('info', f"  \u2192 EXC_RETURN: {exc_return}"))
+            ret_val.append(('info', t('diag_lr_exc_return', desc=exc_return)))
         else:
-            lr_func = self.resolve_pc_to_function(lr & ~1)  # clear Thumb bit
+            lr_func = self.resolve_pc_to_function(lr & ~1)  # сброс Thumb-бита
             if lr_func:
-                ret_val.append((
-                    'info',
-                    f"  \u2192 \u0412\u044b\u0437\u0432\u0430\u043d\u0430 \u0438\u0437: {lr_func}"
-                ))
+                ret_val.append(('info', t('diag_lr_called_from', name=lr_func)))
         ret_val.append(('info', ""))
 
-#----------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 # Анализ значений регистров R0-R3, R12, SP
-#----------------------------------------------------------------------
+#-------------------------------------------------------------------------------
         bfar_val    = registers['BFAR']
         mmfar_val   = registers['MMFAR']
         bfar_valid  = bool((cfsr >> 8) & (1 << 7))  # BFARVALID  (BFSR bit 7)
-        mmfar_valid = bool(cfsr & (1 << 7))          # MMARVALID  (MMFSR bit 7)
+        mmfar_valid = bool(cfsr & (1 << 7))         # MMARVALID  (MMFSR bit 7)
 
-        ret_val.append(('info', "=== Анализ регистров R0-R3, R12, SP ==="))
+        ret_val.append(('info', t('diag_regs_header')))
         for reg in ('R0', 'R1', 'R2', 'R3', 'R12'):
             val = registers[reg]
             notes = []
@@ -1428,31 +1326,39 @@ class ARMFaultAnalyzer:
             if magic:
                 notes.append(magic)
             if bfar_valid and val == bfar_val:
-                notes.append("← совпадает с BFAR (адрес нарушения шины!)")
+                notes.append(t('diag_bfar_match'))
             if mmfar_valid and val == mmfar_val:
-                notes.append("← совпадает с MMFAR (адрес нарушения MPU!)")
-            sym = self.resolve_pc_to_function(val)
-            if sym and (0x08000000 <= val <= 0x1FFFFFFF):
-                notes.append(f"~ {sym}")
+                notes.append(t('diag_mmfar_match'))
+            if not magic:
+                sym = self.resolve_pc_to_function(val)
+                if sym and (0x08000000 <= val <= 0x1FFFFFFF):
+                    notes.append(f"~ {sym}")
             note_str = "  |  ".join(notes)
-            sev = 'error'   if ('BFAR' in note_str or 'MMFAR' in note_str) else \
-                  'warning' if 'NULL' in note_str else 'info'
-            ret_val.append((sev, f"  {reg:<3} = 0x{val:08X}  → {note_str}"))
+            sev = (
+                'error' if (t('diag_bfar_match') in note_str or 
+                            t('diag_mmfar_match') in note_str)
+                else 'warning' if 'NULL' in note_str
+                else 'info'
+            )
+            ret_val.append((sev, f"  {reg:<3} = 0x{val:08X}  \u2192 {note_str}"))
 
         # SP — отдельно, с проверкой выравнивания и диапазона
         sp = registers.get('SP', 0)
         sp_notes = [self.identify_memory_region(sp)]
         sp_sev = 'info'
         if sp & 3:
-            sp_notes.append("ВНИМАНИЕ: SP не выровнен по 4 байтам!")
+            sp_notes.append(t('diag_sp_not_aligned4'))
             sp_sev = 'error'
         elif sp & 7:
-            sp_notes.append("SP не выровнен по 8 байтам (нарушение AAPCS)")
+            sp_notes.append(t('diag_sp_not_aligned8'))
             sp_sev = 'warning'
         if not (0x20000000 <= sp <= 0x3FFFFFFF):
-            sp_notes.append("ВНИМАНИЕ: SP вне SRAM региона!")
+            sp_notes.append(t('diag_sp_out_of_sram'))
             sp_sev = 'error'
-        ret_val.append((sp_sev, f"  SP  = 0x{sp:08X}  → {'  |  '.join(sp_notes)}"))
+        ret_val.append((
+            sp_sev,
+            f"  SP  = 0x{sp:08X}  \u2192 {'  |  '.join(sp_notes)}"
+        ))
 
         ret_val.append(('info', ""))
 
@@ -1463,146 +1369,92 @@ class ARMFaultAnalyzer:
 
         # Проверка HardFault escalation
         if hfsr & (1 << 30):
-            ret_val.append(('error', "КРИТИЧНО: Forced HardFault"))
-            ret_val.append(('warning', "  → HardFault возник из-за эскалации другого fault"))
-            ret_val.append(('info', "  → Причина указана в разделе MemManage/BusFault/UsageFault ниже"))
+            ret_val.append(('error', t('diag_forced_hf')))
+            ret_val.append(('warning', t('diag_forced_hf_sub')))
+            ret_val.append(('info', t('diag_forced_hf_see')))
 
 #-------------------------------------------------------------------------------
-# MemManage Fault Analysis
+# Анализ MemManage Fault
 #-------------------------------------------------------------------------------
         if mmfsr != 0:
-            ret_val.append(('error', "\n[MemManage Fault обнаружен]"))
+            ret_val.append(('error', t('diag_mmfault_header')))
 
             if mmfsr & (1 << 0):  # IACCVIOL
-                ret_val.append(('warning', "  Причина: Попытка выполнить код из защищенной области памяти"))
-                ret_val.append(('info', f"  Решение: Проверьте MPU конфигурацию и адрес PC=0x{pc:08X}"))
+                ret_val.append(('warning', t('diag_mm_iaccviol')))
+                ret_val.append(('info', t('diag_mm_iaccviol_fix', pc=pc)))
 
             if mmfsr & (1 << 1):  # DACCVIOL
-                ret_val.append(('warning', "  Причина: Попытка доступа к данным в защищенной области"))
+                ret_val.append(('warning', t('diag_mm_daccviol')))
                 if mmfsr & (1 << 7):  # MMARVALID
-                    ret_val.append(('info', f"  Адрес нарушения: 0x{registers['MMFAR']:08X} (см. MMFAR)"))
-                ret_val.append(('info', "  Решение: Проверьте настройки MPU и указатели"))
+                    ret_val.append((
+                        'info',
+                        t('diag_mm_daccviol_addr', addr=registers['MMFAR'])
+                    ))
+                ret_val.append(('info', t('diag_mm_daccviol_fix')))
 
             if mmfsr & ((1 << 3) | (1 << 4)):
-                ret_val.append(('warning', "  Причина: Ошибка при stacking/unstacking (переполнение стека?)"))
-                ret_val.append(('info', "  Решение: Увеличьте размер стека или проверьте рекурсию"))
+                ret_val.append(('warning', t('diag_mm_stack')))
+                ret_val.append(('info', t('diag_mm_stack_fix')))
 
 #-------------------------------------------------------------------------------
-# BusFault Analysis
+# Анализ BusFault
 #-------------------------------------------------------------------------------
         if bfsr != 0:
-            ret_val.append(('error', "\n[BusFault обнаружен]"))
+            ret_val.append(('error', t('diag_busfault_header')))
 
             if bfsr & (1 << 0):  # IBUSERR
-                ret_val.append((
-                    'warning',
-                    "  Причина: Попытка чтения инструкции из недоступного адреса"
-                ))
-                ret_val.append(('info', f"  PC указывает на: 0x{pc:08X}"))
-                ret_val.append((
-                    'info',
-                    "  Решение: Проверьте, что PC указывает на валидную Flash память"
-                ))
+                ret_val.append(('warning', t('diag_bf_ibuserr')))
+                ret_val.append(('info', t('diag_bf_ibuserr_pc', pc=pc)))
+                ret_val.append(('info', t('diag_bf_ibuserr_fix')))
 
             if bfsr & (1 << 1):  # PRECISERR
-                ret_val.append((
-                    'warning',
-                    "  Причина: Precise data bus error - доступ к невалидному адресу"
-                ))
+                ret_val.append(('warning', t('diag_bf_preciserr')))
                 if bfsr & (1 << 7):  # BFARVALID
                     ret_val.append((
                         'info',
-                        f"  Адрес нарушения: 0x{registers['BFAR']:08X} (см. BFAR)"
+                        t('diag_bf_preciserr_addr', addr=registers['BFAR'])
                     ))
-                ret_val.append((
-                    'info',
-                    "  Решение: Проверьте указатели, периферию, выравнивание"
-                ))
+                ret_val.append(('info', t('diag_bf_preciserr_fix')))
 
             if bfsr & (1 << 2):  # IMPRECISERR
-                ret_val.append((
-                    'warning',
-                    "  Причина: Imprecise data bus error"
-                ))
-                ret_val.append((
-                    'info',
-                    "  Решение: Включите debug режим для точной диагностики"
-                ))
+                ret_val.append(('warning', t('diag_bf_impreciserr')))
+                ret_val.append(('info', t('diag_bf_impreciserr_fix')))
 
             if bfsr & ((1 << 3) | (1 << 4)):  # UNSTKERR | STKERR
-                ret_val.append((
-                    'warning',
-                    "  Причина: Ошибка bus при работе со стеком"
-                ))
-                ret_val.append((
-                    'info',
-                    "  Решение: Проверьте указатель стека (SP) и размер RAM"
-                ))
+                ret_val.append(('warning', t('diag_bf_stack')))
+                ret_val.append(('info', t('diag_bf_stack_fix')))
 
 #-------------------------------------------------------------------------------
-# UsageFault Analysis
+# Анализ UsageFault
 #-------------------------------------------------------------------------------
         if ufsr != 0:
-            ret_val.append(('error', "\n[UsageFault обнаружен]"))
+            ret_val.append(('error', t('diag_usagefault_header')))
 
             if ufsr & (1 << 0):  # UNDEFINSTR
-                ret_val.append((
-                    'warning',
-                    "  Причина: Попытка выполнить неопределенную инструкцию"
-                ))
-                ret_val.append((
-                    'info',
-                    f"  PC (адрес инструкции): 0x{pc:08X}"
-                ))
-                ret_val.append((
-                    'info',
-                    "  Решение: Проверьте содержимое по адресу PC в дизассемблере"
-                ))
+                ret_val.append(('warning', t('diag_uf_undefinstr')))
+                ret_val.append(('info', t('diag_uf_undefinstr_pc', pc=pc)))
+                ret_val.append(('info', t('diag_uf_undefinstr_fix')))
 
             if ufsr & (1 << 1):
-                ret_val.append((
-                    'warning',
-                    "  Причина: Невалидное состояние процессора (Thumb bit?)"
-                ))
-                ret_val.append((
-                    'info',
-                    "  Решение: Убедитесь что все адреса функций имеют младший бит=1"
-                ))
+                ret_val.append(('warning', t('diag_uf_invstate')))
+                ret_val.append(('info', t('diag_uf_invstate_fix')))
 
             if ufsr & (1 << 2):
-                ret_val.append((
-                    'warning',
-                    "  Причина: Попытка загрузить невалидный PC"
-                ))
-                ret_val.append((
-                    'info',
-                    "  Решение: Проверьте таблицу векторов прерываний"
-                ))
+                ret_val.append(('warning', t('diag_uf_invpc')))
+                ret_val.append(('info', t('diag_uf_invpc_fix')))
 
             if ufsr & (1 << 8):
-                ret_val.append((
-                    'warning',
-                    "  Причина: Невыровненный доступ к памяти"
-                ))
-                ret_val.append((
-                    'info',
-                    "  Решение: Используйте выровненные структуры или packed атрибут"
-                ))
+                ret_val.append(('warning', t('diag_uf_unaligned')))
+                ret_val.append(('info', t('diag_uf_unaligned_fix')))
 
             if ufsr & (1 << 9):
-                ret_val.append(('warning', "  Причина: Деление на ноль"))
-                ret_val.append((
-                    'info',
-                    f"  Проверьте код в районе PC=0x{pc:08X}"
-                ))
+                ret_val.append(('warning', t('diag_uf_divbyzero')))
+                ret_val.append(('info', t('diag_uf_divbyzero_pc', pc=pc)))
 
         # Если нет fault флагов
         if cfsr == 0 and hfsr == 0:
-            ret_val.append(('ok', "Fault flags не установлены"))
-            ret_val.append((
-                'info',
-                "Возможно, это не fault или регистры уже сброшены"
-            ))
+            ret_val.append(('ok', t('diag_no_faults')))
+            ret_val.append(('info', t('diag_no_faults_hint')))
 
         return ret_val
 
@@ -1626,6 +1478,7 @@ class ARMFaultAnalyzer:
 
         self.analysis_history.append(history_entry)
         self.history_listbox.insert(0, f"{timestamp} - PC=0x{registers['PC']:08X}")
+        self._save_history()
 
     def on_history_select(self, event):
         """Handle item selection in the history list box."""
@@ -1639,12 +1492,8 @@ class ARMFaultAnalyzer:
         self.history_text.delete(1.0, tk.END)
 
         # Показ деталей
-        self.history_text.insert(
-            tk.END,
-            f"Анализ от: {entry['timestamp']}\n\n",
-            'info'
-        )
-        self.history_text.insert(tk.END, "=== Регистры ===\n")
+        self.history_text.insert(tk.END, t('hist_analysis_from', ts=entry['timestamp']) + "\n\n", 'info')
+        self.history_text.insert(tk.END, t('hist_registers') + "\n")
         for reg_name, value in entry['registers'].items():
             self.history_text.insert(tk.END, f"{reg_name}: 0x{value:08X}\n")
 
@@ -1654,7 +1503,7 @@ class ARMFaultAnalyzer:
         """Restore register values from the selected history entry."""
         selection = self.history_listbox.curselection()
         if not selection:
-            messagebox.showwarning("Внимание", "Выберите запись из истории")
+            messagebox.showwarning(t('msg_info'), t('msg_select_history'))
             return
 
         idx = selection[0]
@@ -1668,11 +1517,11 @@ class ARMFaultAnalyzer:
         # Переключение на вкладку анализа
         self.notebook.select(0)
 
-        messagebox.showinfo("Готово", "Значения восстановлены из истории")
+        messagebox.showinfo(t('msg_success'), t('msg_restored'))
 
     def clear_history(self):
         """Clear all analysis history entries."""
-        if messagebox.askyesno("Подтверждение", "Очистить всю историю?"):
+        if messagebox.askyesno(t('dlg_confirm'), t('dlg_clear_hist_confirm')):
             self.analysis_history.clear()
             self.history_listbox.delete(0, tk.END)
             self.history_text.delete(1.0, tk.END)
@@ -1694,9 +1543,13 @@ class ARMFaultAnalyzer:
             initial_dir = os.getcwd()
 
         filename = filedialog.askopenfilename(
-            title="Открыть дамп регистров",
+            title=t('dlg_open_dump'),
             initialdir=initial_dir,
-            filetypes=[("JSON files", "*.json"), ("Text files", "*.txt"), ("All files", "*.*")]
+            filetypes=[
+                ("JSON files", "*.json"),
+                ("Text files", "*.txt"),
+                ("All files", "*.*")
+            ]
         )
 
         if not filename:
@@ -1711,7 +1564,7 @@ class ARMFaultAnalyzer:
             initial_dir = os.getcwd()
 
         filename = filedialog.asksaveasfilename(
-            title="Сохранить результаты",
+            title=t('dlg_save_results'),
             initialdir=initial_dir,
             defaultextension=".txt",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
@@ -1723,23 +1576,26 @@ class ARMFaultAnalyzer:
         ret_val = None
         try:
             with open(filename, 'w', encoding='utf-8') as f:
-                f.write("=== ARM Cortex-M Fault Analysis ===\n")
-                f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write(t('report_header') + "\n")
+                f.write(t(
+                    'report_timestamp',
+                    ts=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                ) + "\n\n")
 
-                f.write("=== Регистры ===\n")
+                f.write(t('report_registers') + "\n")
                 for reg_name, entry in self.reg_entries.items():
                     f.write(f"{reg_name}: {entry.get()}\n")
 
-                f.write("\n=== Декодированные флаги ===\n")
+                f.write("\n" + t('report_decoded') + "\n")
                 f.write(self.decode_text.get(1.0, tk.END))
 
-                f.write("\n=== Диагностика ===\n")
+                f.write("\n" + t('report_diagnosis') + "\n")
                 f.write(self.results_text.get(1.0, tk.END))
 
-            messagebox.showinfo("Успех", "Результаты сохранены")
+            messagebox.showinfo(t('msg_success'), t('msg_results_saved'))
             ret_val = True
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{e}")
+            messagebox.showerror(t('msg_error'), t('msg_results_error', error=e))
             ret_val = False
 
         return ret_val
@@ -1754,7 +1610,7 @@ class ARMFaultAnalyzer:
         """Display a popup menu with recently used JSON dump files."""
         recent = self.settings.get('recent_json_files', [])
         if not recent:
-            messagebox.showinfo("Информация", "Нет недавних файлов дампов")
+            messagebox.showinfo(t('msg_info'), t('msg_no_recent'))
             return
         menu = tk.Menu(self.root, tearoff=0)
         for path in recent:
@@ -1784,16 +1640,17 @@ class ARMFaultAnalyzer:
                     else:
                         self.reg_entries[reg_name].insert(0, str(value))
             self._add_to_recent_json(filename)
-            messagebox.showinfo("Успех", "Дамп загружен из файла")
+            messagebox.showinfo(t('msg_success'), t('msg_dump_loaded'))
             ret_val = True
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось загрузить файл:\n{e}")
+            messagebox.showerror(t('msg_error'), t('msg_dump_error', error=e))
             ret_val = False
         return ret_val
 
     def _add_to_recent_map(self, path):
         """
-        @brief  Add a MAP file path to the recent files list and update the Combobox
+        @brief  Add a MAP file path to the recent files list
+                and update the Combobox
 
         @param[in]  path  Absolute path to the MAP file
         """
@@ -1801,8 +1658,10 @@ class ARMFaultAnalyzer:
         if path in recent:
             recent.remove(path)
         recent.insert(0, path)
-        self.settings['recent_map_files'] = recent[:5]
+        lim = self.settings.get('recent_files_limit', 5)
+        self.settings['recent_map_files'] = recent[:lim]
         self.map_file_combo['values'] = self.settings['recent_map_files']
+        self._autosave_settings()
 
     def _add_to_recent_json(self, path):
         """
@@ -1814,7 +1673,49 @@ class ARMFaultAnalyzer:
         if path in recent:
             recent.remove(path)
         recent.insert(0, path)
-        self.settings['recent_json_files'] = recent[:5]
+        lim = self.settings.get('recent_files_limit', 5)
+        self.settings['recent_json_files'] = recent[:lim]
+        self._autosave_settings()
+
+    def _autosave_settings(self):
+        """
+        @brief  Silently save settings (including recent file lists)
+                to config file
+        """
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(self.settings, f, indent=4)
+        except Exception:
+            pass
+
+    def _save_history(self):
+        """
+        @brief  Persist analysis history to a JSON file (last 50 entries)
+        """
+        try:
+            lim = int(self.settings.get('history_limit', 50))
+            data = self.analysis_history[-lim:]
+            with open(self.history_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _load_history(self):
+        """
+        @brief  Load analysis history from JSON file on startup
+        """
+        try:
+            if not os.path.exists(self.history_file):
+                return
+            with open(self.history_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            for entry in data:
+                self.analysis_history.append(entry)
+                ts = entry.get('timestamp', '?')
+                pc = entry.get('registers', {}).get('PC', 0)
+                self.history_listbox.insert(0, f"{ts} - PC=0x{pc:08X}")
+        except Exception:
+            pass
 
 ################################################################################
 #                              Точка входа                                     #

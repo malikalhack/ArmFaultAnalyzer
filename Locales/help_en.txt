@@ -1,0 +1,272 @@
+╔══════════════════════════════════════════════════════════════╗
+║        ARM Cortex-M Fault Analyzer - User Guide              ║
+╚══════════════════════════════════════════════════════════════╝
+
+1. OVERVIEW
+   ═══════════════════════════════════════════════════════════
+   
+   A tool for analysing system faults on ARM Cortex-M
+   microcontrollers (M0/M0+/M3/M4/M7).
+   
+   Supported fault types:
+   • HardFault    - critical processor fault
+   • MemManage    - memory protection violation (MPU)
+   • BusFault     - bus error (invalid address)
+   • UsageFault   - illegal instruction / state
+   • Debug Fault  - debug event
+
+
+2. HOW TO OBTAIN REGISTER VALUES
+   ═══════════════════════════════════════════════════════════
+   
+   Use the naked + C-handler pattern in fault handlers:
+   
+   /* Trampoline macro - checks LR to select MSP or PSP */
+   #define FAULT_TRAMPOLINE() \
+       __asm volatile( \
+           "tst  lr, #4              \n" \
+           "ite  eq                  \n" \
+           "mrseq r0, msp            \n" /* fault in Thread mode, MSP */ \
+           "mrsne r0, psp            \n" /* fault in Handler mode, PSP */ \
+           "b    Common_Fault_Handler_C \n" \
+       )
+   
+   /* Naked handlers - no compiler prologue/epilogue, trampoline only */
+   __attribute__((naked)) void HardFault_Handler(void)  { FAULT_TRAMPOLINE(); }
+   __attribute__((naked)) void BusFault_Handler(void)   { FAULT_TRAMPOLINE(); }
+   __attribute__((naked)) void MemManage_Handler(void)  { FAULT_TRAMPOLINE(); }
+   
+   /* C-level handler receives the stacked frame as fault_args[] */
+   void Common_Fault_Handler_C(uint32_t *fault_args)
+   {
+       __disable_irq();
+   
+       /* Registers saved automatically onto the stack by the CPU */
+       volatile uint32_t stacked_r0  = fault_args[0];
+       volatile uint32_t stacked_r1  = fault_args[1];
+       volatile uint32_t stacked_r2  = fault_args[2];
+       volatile uint32_t stacked_r3  = fault_args[3];
+       volatile uint32_t stacked_r12 = fault_args[4];
+       volatile uint32_t stacked_lr  = fault_args[5];
+       volatile uint32_t stacked_pc  = fault_args[6]; /* address of faulting instruction */
+       volatile uint32_t stacked_psr = fault_args[7];
+   
+       /* Fault Status Registers (read before they are cleared) */
+       volatile uint32_t cfsr = SCB->CFSR;  /* 0xE000ED28 - MMFSR/BFSR/UFSR combined */
+       volatile uint32_t hfsr = SCB->HFSR;  /* 0xE000ED2C - bit30 FORCED = escalated  */
+       volatile uint32_t dfsr = SCB->DFSR;  /* 0xE000ED30 - debug fault status         */
+       volatile uint32_t afsr = SCB->AFSR;  /* 0xE000ED3C - implementation defined     */
+       volatile uint32_t bfar = SCB->BFAR;  /* 0xE000ED38 - valid when BFARVALID=1     */
+       volatile uint32_t mmar = SCB->MMFAR; /* 0xE000ED34 - valid when MMARVALID=1     */
+   
+       /* Suppress unused-variable warnings in release builds */
+       (void)stacked_r0;  (void)stacked_r1;  (void)stacked_r2;  (void)stacked_r3;
+       (void)stacked_r12; (void)stacked_lr;  (void)stacked_pc;  (void)stacked_psr;
+       (void)cfsr; (void)hfsr; (void)dfsr; (void)afsr; (void)bfar; (void)mmar;
+       /* Set a breakpoint here, then read the volatile vars in the debugger
+          and paste the hex values into the ARM Fault Analyzer. */
+       while (1);
+   }
+   
+   OR use a debugger (GDB, J-Link, SEGGER):
+   • Stop at a breakpoint inside the fault handler
+   • Read registers via Memory View or debugger commands
+
+
+3. ANALYSIS WORKFLOW
+   ═══════════════════════════════════════════════════════════
+   
+   Step 1: Enter data
+   ──────────────────
+   Enter register values manually in hex format:
+     R0-R3, R12, LR, PC, PSR   - CPU registers
+     CFSR, HFSR, DFSR, AFSR    - fault status registers
+     BFAR, MMFAR               - fault addresses
+   
+   Or load from a JSON file ("Load from file").
+   
+   Step 2: Analyze
+   ───────────────
+   Click the "Analyze" button.
+   
+   Results:
+   • Upper right panel - decoded register bit-fields
+   • Lower right panel - diagnosis with problem description
+   
+   Step 3: Interpret
+   ─────────────────
+   The diagnosis will show:
+   • Fault type (MemManage/BusFault/UsageFault/HardFault)
+   • Root cause
+   • Remediation recommendations
+   • Addresses of faulting instructions/data
+
+
+4. JSON DUMP FORMAT
+   ═══════════════════════════════════════════════════════════
+   
+   Example fault_dump.json:
+   
+   {
+       "R0": "0x20000100",
+       "R1": "0x00000000",
+       "R2": "0x08001234",
+       "R3": "0xDEADBEEF",
+       "R12": "0x00000000",
+       "LR": "0x08000401",
+       "PC": "0x08002468",
+       "PSR": "0x01000000",
+       "CFSR": "0x00000082",
+       "HFSR": "0x40000000",
+       "DFSR": "0x00000000",
+       "AFSR": "0x00000000",
+       "BFAR": "0x20000100",
+       "MMFAR": "0x00000000"
+   }
+
+
+5. REGISTER REFERENCE
+   ═══════════════════════════════════════════════════════════
+   
+   PC (Program Counter)
+   ────────────────────
+   Address of the instruction that caused the fault.
+   Use a .map file to resolve the function name.
+   
+   LR (Link Register)
+   ──────────────────
+   Return address. May point to the calling function.
+   
+   PSR (Program Status Register)
+   ─────────────────────────────
+   • Bits 31-28: N, Z, C, V arithmetic flags
+   • Bits 8-0:   current exception number
+   • Bit 24:     Thumb bit (must be 1 on Cortex-M)
+   
+   CFSR (Configurable Fault Status Register)
+   ─────────────────────────────────────────
+   Combines three sub-registers:
+   • MMFSR (bits 7-0)   - MemManage fault
+   • BFSR  (bits 15-8)  - BusFault
+   • UFSR  (bits 31-16) - UsageFault
+   
+   HFSR (HardFault Status Register)
+   ────────────────────────────────
+   • Bit 30: FORCED  - escalated from another fault
+   • Bit 1:  VECTTBL - vector table bus fault
+   
+   MMFAR / BFAR
+   ────────────
+   Contain the address that caused MemManage or BusFault.
+   Valid only when MMARVALID / BFARVALID flags are set.
+
+
+6. COMMON PROBLEMS AND SOLUTIONS
+   ═══════════════════════════════════════════════════════════
+   
+   Problem: IBUSERR (Instruction bus error)
+   ─────────────────────────────────────────
+   Cause: PC points to an invalid Flash address
+   Fix:
+   • Check the interrupt vector table
+   • Verify PC is within Flash range (0x08000000+)
+   • Check for Flash corruption
+   
+   Problem: PRECISERR (Precise data bus error)
+   ────────────────────────────────────────────
+   Cause: Access to an invalid memory address
+   Fix:
+   • Check the address in BFAR
+   • Check for NULL pointers
+   • Check for array out-of-bounds
+   • Check peripheral base addresses
+   
+   Problem: UNDEFINSTR (Undefined instruction)
+   ────────────────────────────────────────────
+   Cause: Attempt to execute an unknown instruction
+   Fix:
+   • Disassemble at PC address in your debugger
+   • Possible Flash corruption or bad branch
+   
+   Problem: UNALIGNED (Unaligned access)
+   ──────────────────────────────────────
+   Cause: Unaligned memory access
+   Fix:
+   • Use __attribute__((packed)) or __packed
+   • Ensure structures are properly aligned
+   • Check pointer type casts
+   
+   Problem: DIVBYZERO (Division by zero)
+   ───────────────────────────────────────
+   Cause: Division by zero (requires trap to be enabled)
+   Fix:
+   • Locate division code near PC address
+   • Add divisor check before division
+   
+   Problem: MSTKERR/MUNSTKERR (Stack error)
+   ─────────────────────────────────────────
+   Cause: Stack overflow or MPU protection
+   Fix:
+   • Increase stack size in linker script
+   • Check recursive calls
+   • Check large local variables
+   • Review MPU configuration
+
+
+7. ADDITIONAL FEATURES
+   ═══════════════════════════════════════════════════════════
+   
+   Analysis history
+   ────────────────
+   All completed analyses are saved in the "History" tab.
+   You can restore register values from a previous analysis.
+   
+   Export results
+   ──────────────
+   "Save result" exports the full report to a text file
+   for documentation or sharing with colleagues.
+   
+   Default paths
+   ─────────────
+   The "Settings" tab lets you configure default directories
+   for loading dumps and saving reports.
+
+
+8. USEFUL LINKS
+   ═══════════════════════════════════════════════════════════
+   
+   • ARM Cortex-M Programming Guide:
+     https://developer.arm.com/documentation/
+   
+   • Exception and Fault Handling:
+     ARM DDI 0403E (ARMv7-M Architecture Reference Manual)
+   
+   • Fault Status Registers:
+     https://developer.arm.com/documentation/100165/
+
+
+9. DEBUGGING TIPS
+   ═══════════════════════════════════════════════════════════
+   
+   1. Always check PC first — it is the address of the faulting instruction
+   
+   2. Use a .map file or objdump to resolve the function:
+      arm-none-eabi-objdump -d firmware.elf | grep <PC_address>
+   
+   3. For a FORCED HardFault, check CFSR — that holds the real cause
+   
+   4. BFAR and MMFAR are valid only when BFARVALID and MMARVALID
+      flags are set respectively
+   
+   5. Enable UsageFault, BusFault, MemManage in SCB->SHCSR:
+      SCB->SHCSR |= (SCB_SHCSR_USGFAULTENA_Msk |
+                     SCB_SHCSR_BUSFAULTENA_Msk |
+                     SCB_SHCSR_MEMFAULTENA_Msk);
+   
+   6. For more precise BusFault diagnosis, use precise mode
+      (disable write buffering if needed)
+
+
+══════════════════════════════════════════════════════════════
+                    (C) 2026 ARM Fault Analyzer
+══════════════════════════════════════════════════════════════
