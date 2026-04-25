@@ -601,10 +601,10 @@ class ARMFaultAnalyzer:
 
         lang = self.settings.get('language', 'ru')
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        help_path = os.path.join(base_dir, 'locales', f'help_{lang}.txt')
+        help_path = os.path.join(base_dir, 'Locales', f'help_{lang}.txt')
         # Fallback на русский, если файл для выбранного языка отсутствует
         if not os.path.exists(help_path):
-            help_path = os.path.join(base_dir, 'locales', 'help_ru.txt')
+            help_path = os.path.join(base_dir, 'Locales', 'help_ru.txt')
 
         help_content = ""
         try:
@@ -951,9 +951,9 @@ class ARMFaultAnalyzer:
         }
         return EXC_RETURN_MAP.get(lr, None)
 
-    #--------------------------------------------------------------------------
-    # Функции декодирования регистров статуса ошибок
-    #--------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# Функции декодирования регистров статуса ошибок
+#-------------------------------------------------------------------------------
 
     def decode_cfsr(self, cfsr_value):
         """
@@ -1033,8 +1033,6 @@ class ARMFaultAnalyzer:
 
         return ret_val
 
-    #--------------------------------------------------------------------------
-
     def decode_hfsr(self, hfsr_value):
         """
         @brief  Decode HFSR register (HardFault Status Register)
@@ -1063,8 +1061,6 @@ class ARMFaultAnalyzer:
             ret_val.append(t('decode_hfsr_ok'))
 
         return ret_val
-
-    #--------------------------------------------------------------------------
 
     def decode_dfsr(self, dfsr_value):
         """
@@ -1095,8 +1091,6 @@ class ARMFaultAnalyzer:
 
         return ret_val
 
-    #--------------------------------------------------------------------------
-
     def decode_afsr(self, afsr_value):
         """
         @brief  Decode AFSR register (Auxiliary Fault Status Register)
@@ -1117,8 +1111,6 @@ class ARMFaultAnalyzer:
             ret_val.append(t('decode_afsr_info'))
 
         return ret_val
-
-    #--------------------------------------------------------------------------
 
     def decode_psr(self, psr_value):
         """
@@ -1173,9 +1165,9 @@ class ARMFaultAnalyzer:
 
         return ret_val
 
-    #==========================================================================
-    # Основная функция анализа
-    #==========================================================================
+#===============================================================================
+# Основная функция анализа
+#===============================================================================
 
     def analyze_fault(self):
         """
@@ -1205,9 +1197,9 @@ class ARMFaultAnalyzer:
         for reg_name, entry in self.reg_entries.items():
             registers[reg_name] = self.parse_hex_value(entry.get())
 
-        #----------------------------------------------------------------------
-        # ДЕКОДИРОВАНИЕ FAULT STATUS РЕГИСТРОВ
-        #----------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# ДЕКОДИРОВАНИЕ FAULT STATUS РЕГИСТРОВ
+#-------------------------------------------------------------------------------
 
         # CFSR (Configurable Fault Status Register)
         cfsr_decoded = self.decode_cfsr(registers['CFSR'])
@@ -1282,8 +1274,6 @@ class ARMFaultAnalyzer:
             diagnosis
         )
 
-    #--------------------------------------------------------------------------
-
     def diagnose_fault(self, registers):
         """
         @brief  Diagnose fault cause and provide remediation recommendations
@@ -1319,9 +1309,9 @@ class ARMFaultAnalyzer:
                 ret_val.append(('info', t('diag_lr_called_from', name=lr_func)))
         ret_val.append(('info', ""))
 
-        #----------------------------------------------------------------------
-        # Анализ значений регистров R0-R3, R12, SP
-        #----------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# Анализ значений регистров R0-R3, R12, SP
+#-------------------------------------------------------------------------------
         bfar_val    = registers['BFAR']
         mmfar_val   = registers['MMFAR']
         bfar_valid  = bool((cfsr >> 8) & (1 << 7))  # BFARVALID  (BFSR bit 7)
@@ -1344,8 +1334,12 @@ class ARMFaultAnalyzer:
                 if sym and (0x08000000 <= val <= 0x1FFFFFFF):
                     notes.append(f"~ {sym}")
             note_str = "  |  ".join(notes)
-            sev = 'error'   if (t('diag_bfar_match') in note_str or t('diag_mmfar_match') in note_str) else \
-                  'warning' if 'NULL' in note_str else 'info'
+            sev = (
+                'error' if (t('diag_bfar_match') in note_str or 
+                            t('diag_mmfar_match') in note_str)
+                else 'warning' if 'NULL' in note_str
+                else 'info'
+            )
             ret_val.append((sev, f"  {reg:<3} = 0x{val:08X}  \u2192 {note_str}"))
 
         # SP — отдельно, с проверкой выравнивания и диапазона
@@ -1379,9 +1373,9 @@ class ARMFaultAnalyzer:
             ret_val.append(('warning', t('diag_forced_hf_sub')))
             ret_val.append(('info', t('diag_forced_hf_see')))
 
-        #----------------------------------------------------------------------
-        # Анализ MemManage Fault
-        #----------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# Анализ MemManage Fault
+#-------------------------------------------------------------------------------
         if mmfsr != 0:
             ret_val.append(('error', t('diag_mmfault_header')))
 
@@ -1402,9 +1396,9 @@ class ARMFaultAnalyzer:
                 ret_val.append(('warning', t('diag_mm_stack')))
                 ret_val.append(('info', t('diag_mm_stack_fix')))
 
-        #----------------------------------------------------------------------
-        # Анализ BusFault
-        #----------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# Анализ BusFault
+#-------------------------------------------------------------------------------
         if bfsr != 0:
             ret_val.append(('error', t('diag_busfault_header')))
 
@@ -1430,9 +1424,9 @@ class ARMFaultAnalyzer:
                 ret_val.append(('warning', t('diag_bf_stack')))
                 ret_val.append(('info', t('diag_bf_stack_fix')))
 
-        #----------------------------------------------------------------------
-        # Анализ UsageFault
-        #----------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# Анализ UsageFault
+#-------------------------------------------------------------------------------
         if ufsr != 0:
             ret_val.append(('error', t('diag_usagefault_header')))
 
@@ -1722,6 +1716,10 @@ class ARMFaultAnalyzer:
                 self.history_listbox.insert(0, f"{ts} - PC=0x{pc:08X}")
         except Exception:
             pass
+
+################################################################################
+#                              Точка входа                                     #
+################################################################################
 
 def main():
     """

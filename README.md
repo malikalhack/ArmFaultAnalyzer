@@ -56,10 +56,10 @@ Not all fields are required - missing registers default to `0x00000000`.
 |------|----------|
 | `arm_analyzer_config.json` | Application settings, paths, recent file lists, language |
 | `arm_analyzer_history.json` | Analysis history (up to N entries, configurable) |
-| `locales/ru.json` | UI strings and diagnostics - Russian |
-| `locales/en.json` | UI strings and diagnostics - English |
-| `locales/help_ru.txt` | Help tab content - Russian |
-| `locales/help_en.txt` | Help tab content - English |
+| `Locales/ru.json` | UI strings and diagnostics - Russian |
+| `Locales/en.json` | UI strings and diagnostics - English |
+| `Locales/help_ru.txt` | Help tab content - Russian |
+| `Locales/help_en.txt` | Help tab content - English |
 
 ## Settings
 
@@ -71,7 +71,7 @@ The **Settings** tab allows you to configure:
 - Maximum history entries, 10 to 500
 - **Interface language** (Russian / English) - applied on restart
 
-To add a new language, create `locales/<lang>.json` and `locales/help_<lang>.txt`,
+To add a new language, create `Locales/<lang>.json` and `Locales/help_<lang>.txt`,
 then add the language code to the Combobox values in `create_settings_tab()`.
 
 Full usage guide, register descriptions, and common fault scenarios are available in the **Help** tab inside the application.
@@ -79,7 +79,6 @@ Full usage guide, register descriptions, and common fault scenarios are availabl
 ## Interface
 
 ![](./Images/analyzer.jpg)
-
 
 ---
 
