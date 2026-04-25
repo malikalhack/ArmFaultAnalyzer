@@ -7,11 +7,15 @@
  * @author  Anton Chernov
  * @date    04/23/2026
  * @brief   ARM Cortex-M Fault Analyzer with GUI
+ * 
+ * @details A tool for detailed analysis of system faults on ARM Cortex-M
+ *          microcontrollers (M0/M0+/M3/M4/M7).
  ******************************************************************************
 """
 
 ################################ Импорт модулей ################################
 import tkinter as tk
+from tkinter import ttk
 import sys
 
 ################################################################################
@@ -27,7 +31,7 @@ def get_version() -> str:
 def validate_py_version() -> bool:
     """
     @brief  Check that the interpreter meets the minimum version requirement.
-    
+
     @return True if Python >= 3.8, False otherwise.
     """
     bool_result = True
@@ -47,16 +51,48 @@ class ARMFaultAnalyzer:
     """
     @brief  Main GUI class for the ARM Cortex-M fault register analyzer
     """
-    
+
     def __init__(self, root):
         """
         @brief  Initialize the main application window
-        
+
         @param[in]  root  Tkinter root window object
         """
         self.root = root
         self.root.title("ARM Cortex-M Fault Analyzer")
         self.root.geometry("1100x870")
+
+        # Настройки по умолчанию
+        self.config_file = "arm_analyzer_config.json"
+        self.settings = {
+            'default_load_path': '',
+            'default_save_path': ''
+        }
+        self.load_settings()
+
+        # Создание вкладок
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Вкладка анализа
+        self.analysis_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.analysis_frame, text="Анализ регистров")
+
+        # Вкладка истории
+        self.history_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.history_frame, text="История")
+
+        # Вкладка настроек
+        self.settings_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.settings_frame, text="Настройки")
+
+        # Вкладка помощи
+        self.help_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.help_frame, text="Помощь")
+
+    def load_settings(self):
+        """Load settings from the config file."""
+        pass
 
     def create_analysis_tab(self):
         """Create the register analysis tab."""
@@ -165,7 +201,7 @@ class ARMFaultAnalyzer:
 #===============================================================================
 # Основная функция анализа
 #===============================================================================
-    
+
     def analyze_fault(self):
         """
         @brief  Main fault analysis entry point
@@ -173,7 +209,7 @@ class ARMFaultAnalyzer:
         pass
 
 #-------------------------------------------------------------------------------
-    
+
     def diagnose_fault(self, registers):
         """
         @brief  Diagnose fault cause and provide remediation recommendations
