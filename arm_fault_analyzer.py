@@ -15,7 +15,8 @@
 
 ################################ Импорт модулей ################################
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, filedialog
+import json
 import sys
 import os
 
@@ -45,7 +46,7 @@ def validate_py_version() -> bool:
     return bool_result
 
 ################################################################################
-#                        Класс ARM Fault Analyzer                             #
+#                        Класс ARM Fault Analyzer                              #
 ################################################################################
 
 class ARMFaultAnalyzer:
@@ -704,15 +705,42 @@ class ARMFaultAnalyzer:
 
     def load_settings(self):
         """Load settings from the config file."""
-        pass
+        ret_val = None
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    self.settings = json.load(f)
+                ret_val = True
+            else:
+                ret_val = False
+        except Exception:
+            ret_val = False
+        return ret_val
 
     def save_settings_ui(self):
         """Read settings from the UI controls and save them to the config file."""
-        pass
+        self.settings['default_load_path'] = self.load_path_entry.get()
+        self.settings['default_save_path'] = self.save_path_entry.get()
+
+        ret_val = None
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(self.settings, f, indent=4)
+            messagebox.showinfo("Успех", "Настройки сохранены")
+            ret_val = True
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить настройки:\n{e}")
+            ret_val = False
+        return ret_val
 
     def reset_settings(self):
         """Reset all settings to their default values."""
-        pass
+        if messagebox.askyesno("Подтверждение", "Сбросить настройки по умолчанию?"):
+            self.load_path_entry.delete(0, tk.END)
+            self.save_path_entry.delete(0, tk.END)
+            self.settings['default_load_path'] = ''
+            self.settings['default_save_path'] = ''
+            messagebox.showinfo("Готово", "Настройки сброшены")
 
     def create_tooltip(self, widget, text):
         """Attach a hover tooltip to a widget."""
