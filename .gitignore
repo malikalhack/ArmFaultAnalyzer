@@ -209,3 +209,6 @@ __marimo__/
 # Configuration files for the script
 **.json
 !**/fault_dump_example.json
+
+# Report/result files from the script
+*.txt

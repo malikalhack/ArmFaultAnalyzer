@@ -3,7 +3,7 @@
 """
  *******************************************************************************
  * @file    arm_fault_analyzer.py
- * @version 0.4.0
+ * @version 1.0.0
  * @author  Anton Chernov
  * @date    04/23/2026
  * @brief   ARM Cortex-M Fault Analyzer with GUI
@@ -36,13 +36,14 @@ from tkinter import ttk, scrolledtext, messagebox, filedialog
 import json
 import sys
 import os
+import re
 from datetime import datetime
 
 ################################################################################
 #                              Версия приложения                               #
 ################################################################################
 
-APP_VERSION = "0.5.0"
+APP_VERSION = "1.0.0"
 
 def get_version() -> str:
     """Return the application version string."""
@@ -229,6 +230,44 @@ class ARMFaultAnalyzer:
             command=self.save_results
         ).pack(fill=tk.X, pady=2)
 
+        # MAP файл для определения функции по адресу PC
+        map_frame = ttk.LabelFrame(
+            left_panel,
+            text="MAP файл (функция по PC)",
+            padding=10
+        )
+        map_frame.pack(fill=tk.X, pady=5)
+
+        map_row = ttk.Frame(map_frame)
+        map_row.pack(fill=tk.X)
+
+        self.map_file_entry = ttk.Entry(map_row)
+        self.map_file_entry.pack(
+            side=tk.LEFT,
+            fill=tk.X,
+            expand=True,
+            padx=(0, 3)
+        )
+
+        ttk.Button(
+            map_row,
+            text="Обзор...",
+            command=self.browse_map_file
+        ).pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Button(
+            map_row,
+            text="✕",
+            command=self.clear_map_file,
+            width=2
+        ).pack(side=tk.LEFT)
+
+        self.map_status_label = ttk.Label(
+            map_frame,
+            text="Файл не загружен",
+            foreground="gray"
+        )
+        self.map_status_label.pack(anchor=tk.W, pady=(5, 0))
+
         # === ПРАВАЯ ПАНЕЛЬ ===
 
         # Декодированные флаги
@@ -353,7 +392,7 @@ class ARMFaultAnalyzer:
             text="Каталог загрузки дампов:",
             width=28
         ).pack(side=tk.LEFT)
-        self.load_path_entry = ttk.Entry(load_frame, width=40)
+        self.load_path_entry = ttk.Entry(load_frame, width=60)
         self.load_path_entry.pack(side=tk.LEFT, padx=5)
         self.load_path_entry.insert(0, self.settings['default_load_path'])
         ttk.Button(
@@ -370,7 +409,7 @@ class ARMFaultAnalyzer:
             text="Каталог сохранения отчётов:",
             width=28
         ).pack(side=tk.LEFT)
-        self.save_path_entry = ttk.Entry(save_frame, width=40)
+        self.save_path_entry = ttk.Entry(save_frame, width=60)
         self.save_path_entry.pack(side=tk.LEFT, padx=5)
         self.save_path_entry.insert(0, self.settings['default_save_path'])
         ttk.Button(
@@ -795,6 +834,64 @@ class ARMFaultAnalyzer:
             ret_val = 0
         return ret_val
 
+    def load_map_file(self, path):
+        """
+        @brief  Parse a MAP file (GNU LD or AC6 armlink) and build a sorted symbol table
+
+        @details Auto-detects the map format by scanning for format-specific markers:
+                 - AC6 armlink : contains 'Image Symbol Table' header;
+                                 symbol lines have the form:
+                                   <name>  0x<addr>  Thumb Code ...
+                                   <name>  0x<addr>  ARM Code   ...
+                 - GNU LD      : symbol lines have the form:
+                                   <whitespace> 0x<addr> <name>
+                 Builds a list sorted by address for binary search lookup.
+
+        @param[in]  path  Absolute path to the .map file
+        @return     True on success, False on failure
+        """
+        self.map_symbols = []
+        ret_val = False
+
+        # Patterns for both compilers
+        gnu_pattern = re.compile(r'^\s+(0x[0-9a-fA-F]{4,})\s+([A-Za-z_]\w+)\s*$')
+        ac6_pattern = re.compile(
+            r'^\s+([A-Za-z_]\w+)\s+(0x[0-9a-fA-F]{8})\s+(?:Thumb|ARM)\s+Code'
+        )
+
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+
+            # Auto-detect format
+            is_ac6 = any('Image Symbol Table' in line for line in lines)
+            fmt_name = "AC6 armlink" if is_ac6 else "GNU LD"
+            pattern = ac6_pattern if is_ac6 else gnu_pattern
+
+            for line in lines:
+                m = pattern.match(line)
+                if m:
+                    if is_ac6:
+                        name = m.group(1)
+                        addr = int(m.group(2), 16)
+                    else:
+                        addr = int(m.group(1), 16)
+                        name = m.group(2)
+                    self.map_symbols.append((addr, name))
+
+            self.map_symbols.sort(key=lambda x: x[0])
+            count = len(self.map_symbols)
+            self.map_status_label.config(
+                text=f"[{fmt_name}] Загружено символов: {count}",
+                foreground="green"
+            )
+            ret_val = True
+        except Exception as e:
+            self.map_status_label.config(text=f"Ошибка загрузки: {e}", foreground="red")
+            self.map_symbols = []
+            ret_val = False
+        return ret_val
+
     def resolve_pc_to_function(self, pc):
         """
         @brief  Find the function name for a given PC address via binary search
@@ -1127,6 +1224,11 @@ class ARMFaultAnalyzer:
         """
         self.decode_text.delete(1.0, tk.END)
         self.results_text.delete(1.0, tk.END)
+
+        # Автозагрузка MAP файла если путь задан, но символы ещё не загружены
+        map_path = self.map_file_entry.get().strip()
+        if map_path and not self.map_symbols and os.path.exists(map_path):
+            self.load_map_file(map_path)
 
         # Парсинг значений из полей ввода
         registers = {}
