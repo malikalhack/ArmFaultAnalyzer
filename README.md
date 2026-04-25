@@ -20,10 +20,11 @@ python arm_fault_analyzer.py
 - PC / LR address resolution to function names via MAP file
 - Register decoding: CFSR (MMFSR / BFSR / UFSR), HFSR, DFSR, AFSR, PSR
 - ISR number decoding in PSR and EXC\_RETURN decoding in LR
-- Analysis of R0–R3, R12, SP: memory region, magic value detection, BFAR/MMFAR match
+- Analysis of R0-R3, R12, SP: memory region, magic value detection, BFAR/MMFAR match
 - Persistent analysis history across sessions
 - Report export to a text file
 - One-click copy of diagnostics to clipboard
+- **Localisation**: interface language selectable in Settings (Russian / English); applied after restart
 
 ## JSON Dump Format
 
@@ -55,6 +56,10 @@ Not all fields are required - missing registers default to `0x00000000`.
 |------|----------|
 | `arm_analyzer_config.json` | Application settings, paths, recent file lists, language |
 | `arm_analyzer_history.json` | Analysis history (up to N entries, configurable) |
+| `locales/ru.json` | UI strings and diagnostics - Russian |
+| `locales/en.json` | UI strings and diagnostics - English |
+| `locales/help_ru.txt` | Help tab content - Russian |
+| `locales/help_en.txt` | Help tab content - English |
 
 ## Settings
 
@@ -62,7 +67,12 @@ The **Settings** tab allows you to configure:
 
 - Default directory for loading JSON dumps
 - Default directory for saving reports
-- Recent files list size (MAP and JSON)
+- Recent files list size (MAP and JSON), 1 to 20 entries
+- Maximum history entries, 10 to 500
+- **Interface language** (Russian / English) - applied on restart
+
+To add a new language, create `locales/<lang>.json` and `locales/help_<lang>.txt`,
+then add the language code to the Combobox values in `create_settings_tab()`.
 
 Full usage guide, register descriptions, and common fault scenarios are available in the **Help** tab inside the application.
 
@@ -72,9 +82,10 @@ Full usage guide, register descriptions, and common fault scenarios are availabl
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2 | April 2026 | Localisation support (ru/en): JSON locale files + help text files, language selector in Settings, auto-restart on language change |
 | 1.1 | April 2026 | Added history saving for JSON and MAP files |
 | 1.0 | April 2026 | Initial release |
 
 ---
 
-*Document version: 1.1*
+*Document version: 1.2*

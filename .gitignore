@@ -206,9 +206,12 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Report/result files from the script
+**.txt
+
 # Configuration files for the script
 **.json
 !**/fault_dump_example.json
+!Locales/**
 
-# Report/result files from the script
-*.txt
+
