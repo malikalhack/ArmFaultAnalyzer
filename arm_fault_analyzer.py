@@ -15,7 +15,7 @@
 
 ################################ Импорт модулей ################################
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, messagebox
 import sys
 
 ################################################################################
@@ -738,11 +738,30 @@ class ARMFaultAnalyzer:
 
     def restore_from_history(self):
         """Restore register values from the selected history entry."""
-        pass
+        selection = self.history_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Внимание", "Выберите запись из истории")
+            return
+
+        idx = selection[0]
+        entry = self.analysis_history[len(self.analysis_history) - 1 - idx]
+
+        # Восстановление значений в поля
+        for reg_name, value in entry['registers'].items():
+            self.reg_entries[reg_name].delete(0, tk.END)
+            self.reg_entries[reg_name].insert(0, f"0x{value:08X}")
+
+        # Переключение на вкладку анализа
+        self.notebook.select(0)
+
+        messagebox.showinfo("Готово", "Значения восстановлены из истории")
 
     def clear_history(self):
         """Clear all analysis history entries."""
-        pass
+        if messagebox.askyesno("Подтверждение", "Очистить всю историю?"):
+            self.analysis_history.clear()
+            self.history_listbox.delete(0, tk.END)
+            self.history_text.delete(1.0, tk.END)
 
     def clear_fields(self):
         """Reset all register input fields to their default values."""
