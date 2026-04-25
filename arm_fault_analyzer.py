@@ -176,7 +176,7 @@ class ARMFaultAnalyzer:
             label = ttk.Label(frame, text="?", foreground="blue", cursor="hand2")
             label.pack(side=tk.LEFT)
             self.create_tooltip(label, tooltip)
-        
+
         # Кнопки управления
         btn_frame = ttk.Frame(left_panel)
         btn_frame.pack(fill=tk.X, pady=10)
@@ -211,7 +211,7 @@ class ARMFaultAnalyzer:
             padding=5
         )
         decode_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
+
         self.decode_text = scrolledtext.ScrolledText(
             decode_frame,
             height=26,
@@ -219,7 +219,7 @@ class ARMFaultAnalyzer:
             font=("Consolas", 9)
         )
         self.decode_text.pack(fill=tk.BOTH, expand=True)
-        
+
         # Результаты анализа
         results_frame = ttk.LabelFrame(
             right_panel,
@@ -227,7 +227,7 @@ class ARMFaultAnalyzer:
             padding=5
         )
         results_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
+
         self.results_text = scrolledtext.ScrolledText(
             results_frame,
             height=15,
@@ -235,7 +235,7 @@ class ARMFaultAnalyzer:
             font=("Consolas", 9)
         )
         self.results_text.pack(fill=tk.BOTH, expand=True)
-        
+
         # Настройка цветовых тегов
         self.decode_text.tag_config(
             "error",
@@ -245,7 +245,7 @@ class ARMFaultAnalyzer:
         self.decode_text.tag_config("warning", foreground="orange")
         self.decode_text.tag_config("info", foreground="blue")
         self.decode_text.tag_config("ok", foreground="green")
-        
+
         self.results_text.tag_config(
             "error",
             foreground="red",
@@ -260,7 +260,41 @@ class ARMFaultAnalyzer:
 
     def create_history_tab(self):
         """Create the history tab."""
-        pass
+
+        # Список истории
+        self.history_listbox = tk.Listbox(self.history_frame, height=10)
+        self.history_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.history_listbox.bind('<<ListboxSelect>>', self.on_history_select)
+
+        # Детали выбранного анализа
+        details_frame = ttk.LabelFrame(
+            self.history_frame,
+            text="Детали анализа",
+            padding=5
+        )
+        details_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.history_text = scrolledtext.ScrolledText(
+            details_frame,
+            wrap=tk.WORD,
+            font=("Consolas", 9)
+        )
+        self.history_text.pack(fill=tk.BOTH, expand=True)
+
+        # Кнопки
+        btn_frame = ttk.Frame(self.history_frame)
+        btn_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Button(
+            btn_frame,
+            text="Восстановить",
+            command=self.restore_from_history
+        ).pack(side=tk.LEFT, padx=2)
+        ttk.Button(
+            btn_frame,
+            text="Очистить историю",
+            command=self.clear_history
+        ).pack(side=tk.LEFT, padx=2)
 
     def create_settings_tab(self):
         """Create the settings tab."""
@@ -569,10 +603,6 @@ class ARMFaultAnalyzer:
         """Parse a hex string (with or without '0x' prefix) and return an integer."""
         pass
 
-    def create_history_tab(self):
-        """Create the history tab."""
-        pass
-
     def create_settings_tab(self):
         """Create the settings tab."""
         pass
@@ -682,6 +712,29 @@ class ARMFaultAnalyzer:
         @brief  Diagnose fault cause and provide remediation recommendations
         """
         pass
+
+    def on_history_select(self, event):
+        """Обработка выбора из истории"""
+        selection = self.history_listbox.curselection()
+        if not selection:
+            return
+
+        idx = selection[0]
+        entry = self.analysis_history[len(self.analysis_history) - 1 - idx]
+
+        self.history_text.delete(1.0, tk.END)
+
+        # Показ деталей
+        self.history_text.insert(
+            tk.END,
+            f"Анализ от: {entry['timestamp']}\n\n",
+            'info'
+        )
+        self.history_text.insert(tk.END, "=== Регистры ===\n")
+        for reg_name, value in entry['registers'].items():
+            self.history_text.insert(tk.END, f"{reg_name}: 0x{value:08X}\n")
+
+        self.history_text.tag_config('info', font=("Consolas", 9, "bold"))
 
     def restore_from_history(self):
         """Restore register values from the selected history entry."""
