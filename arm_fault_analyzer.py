@@ -3,7 +3,7 @@
 """
  ******************************************************************************
  * @file    arm_fault_analyzer.py
- * @version 0.1.0
+ * @version 0.2.0
  * @author  Anton Chernov
  * @date    04/23/2026
  * @brief   ARM Cortex-M Fault Analyzer with GUI
@@ -11,13 +11,14 @@
 """
 
 ################################ Импорт модулей ################################
+import tkinter as tk
 import sys
 
 ################################################################################
 #                              Версия приложения                               #
 ################################################################################
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 
 def get_version() -> str:
     """Return the application version string."""
@@ -39,6 +40,24 @@ def validate_py_version() -> bool:
     return bool_result
 
 ################################################################################
+#                        Класс ARM Fault Analyzer                             #
+################################################################################
+
+class ARMFaultAnalyzer:
+    """
+    @brief  Main GUI class for the ARM Cortex-M fault register analyzer
+    """
+    
+    def __init__(self, root):
+        """
+        @brief  Initialize the main application window
+        
+        @param[in]  root  Tkinter root window object
+        """
+        self.root = root
+        self.root.geometry("1100x870")
+
+################################################################################
 #                              Точка входа                                     #
 ################################################################################
 
@@ -48,6 +67,9 @@ def main():
     """
     if not validate_py_version():
         sys.exit(1)
+    root = tk.Tk()
+    app = ARMFaultAnalyzer(root)
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
