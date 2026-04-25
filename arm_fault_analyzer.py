@@ -3,7 +3,7 @@
 """
  *******************************************************************************
  * @file    arm_fault_analyzer.py
- * @version 1.0.0
+ * @version 1.1.0
  * @author  Anton Chernov
  * @date    04/23/2026
  * @brief   ARM Cortex-M Fault Analyzer with GUI
@@ -43,7 +43,7 @@ from datetime import datetime
 #                              Версия приложения                               #
 ################################################################################
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 def get_version() -> str:
     """Return the application version string."""
@@ -94,7 +94,9 @@ class ARMFaultAnalyzer:
         self.config_file = "arm_analyzer_config.json"
         self.settings = {
             'default_load_path': '',
-            'default_save_path': ''
+            'default_save_path': '',
+            'recent_map_files': [],
+            'recent_json_files': []
         }
         self.load_settings()
 
@@ -164,6 +166,7 @@ class ARMFaultAnalyzer:
             ("R2", "0x00000000"),
             ("R3", "0x00000000"),
             ("R12", "0x00000000"),
+            ("SP",  "0x20000000"),
             ("LR", "0x00000000"),
             ("PC", "0x00000000"),
             ("PSR", "0x01000000"),
@@ -224,6 +227,12 @@ class ARMFaultAnalyzer:
             text="Загрузить из файла",
             command=self.load_from_file
         ).pack(fill=tk.X, pady=2)
+        self.recent_json_btn = ttk.Button(
+            btn_frame,
+            text="Недавние JSON...",
+            command=self.show_recent_json_menu
+        )
+        self.recent_json_btn.pack(fill=tk.X, pady=2)
         ttk.Button(
             btn_frame,
             text="Сохранить результат",
@@ -233,7 +242,7 @@ class ARMFaultAnalyzer:
         # MAP файл для определения функции по адресу PC
         map_frame = ttk.LabelFrame(
             left_panel,
-            text="MAP файл (функция по PC)",
+            text="MAP файл",
             padding=10
         )
         map_frame.pack(fill=tk.X, pady=5)
@@ -241,8 +250,11 @@ class ARMFaultAnalyzer:
         map_row = ttk.Frame(map_frame)
         map_row.pack(fill=tk.X)
 
-        self.map_file_entry = ttk.Entry(map_row)
-        self.map_file_entry.pack(
+        self.map_file_combo = ttk.Combobox(
+            map_row,
+            values=self.settings.get('recent_map_files', [])
+        )
+        self.map_file_combo.pack(
             side=tk.LEFT,
             fill=tk.X,
             expand=True,
@@ -301,6 +313,11 @@ class ARMFaultAnalyzer:
             font=("Consolas", 9)
         )
         self.results_text.pack(fill=tk.BOTH, expand=True)
+        ttk.Button(
+            results_frame,
+            text="Копировать диагностику",
+            command=self.copy_diagnosis
+        ).pack(anchor=tk.E, pady=(3, 0))
 
         # Настройка цветовых тегов
         self.decode_text.tag_config(
@@ -754,13 +771,13 @@ class ARMFaultAnalyzer:
             filetypes=[("MAP files", "*.map"), ("All files", "*.*")]
         )
         if filename:
-            self.map_file_entry.delete(0, tk.END)
-            self.map_file_entry.insert(0, filename)
+            self._add_to_recent_map(filename)
+            self.map_file_combo.set(filename)
             self.load_map_file(filename)
 
     def clear_map_file(self):
         """Сброс загруженного MAP файла"""
-        self.map_file_entry.delete(0, tk.END)
+        self.map_file_combo.set('')
         self.map_symbols = []
         self.map_status_label.config(text="Файл не загружен", foreground="gray")
 
@@ -999,6 +1016,27 @@ class ARMFaultAnalyzer:
         }
         return MAGIC.get(val, None)
 
+    def decode_exc_return(self, lr):
+        """
+        @brief  Decode EXC_RETURN value in LR register
+
+        @details When the processor enters an exception handler, LR is loaded with
+                 a special EXC_RETURN value (bits [31:4] = 0xFFFFFFF or 0xFFFFFFE).
+                 Bits [3:0] encode the return mode, stack pointer, and FPU state.
+
+        @param[in]  lr  Link Register value (32-bit)
+        @return     Description string if lr is a valid EXC_RETURN, None otherwise
+        """
+        EXC_RETURN_MAP = {
+            0xFFFFFFF1: "Handler mode → Handler mode, MSP, no FPU",
+            0xFFFFFFF9: "Handler mode → Thread mode,  MSP, no FPU",
+            0xFFFFFFFD: "Handler mode → Thread mode,  PSP, no FPU",
+            0xFFFFFFE1: "Handler mode → Handler mode, MSP, FPU active",
+            0xFFFFFFE9: "Handler mode → Thread mode,  MSP, FPU active",
+            0xFFFFFFED: "Handler mode → Thread mode,  PSP, FPU active",
+        }
+        return EXC_RETURN_MAP.get(lr, None)
+
 #-------------------------------------------------------------------------------
 # Decode Functions - Fault Status Registers
 #-------------------------------------------------------------------------------
@@ -1193,7 +1231,25 @@ class ARMFaultAnalyzer:
 
         # ISR number
         isr_num = psr_value & 0x1FF
-        ret_val.append(f"  Exception number: {isr_num}")
+        ISR_NAMES = {
+            0:  "Thread mode (no exception)",
+            2:  "NMI",
+            3:  "HardFault",
+            4:  "MemManage",
+            5:  "BusFault",
+            6:  "UsageFault",
+            11: "SVCall",
+            12: "DebugMonitor",
+            14: "PendSV",
+            15: "SysTick",
+        }
+        if isr_num in ISR_NAMES:
+            isr_str = ISR_NAMES[isr_num]
+        elif isr_num >= 16:
+            isr_str = f"IRQ{isr_num - 16}"
+        else:
+            isr_str = "Reserved"
+        ret_val.append(f"  Exception number: {isr_num} ({isr_str})")
 
         # Thumb state
         thumb = (psr_value >> 24) & 1
@@ -1226,7 +1282,7 @@ class ARMFaultAnalyzer:
         self.results_text.delete(1.0, tk.END)
 
         # Автозагрузка MAP файла если путь задан, но символы ещё не загружены
-        map_path = self.map_file_entry.get().strip()
+        map_path = self.map_file_combo.get().strip()
         if map_path and not self.map_symbols and os.path.exists(map_path):
             self.load_map_file(map_path)
 
@@ -1343,23 +1399,27 @@ class ARMFaultAnalyzer:
                 f"  \u2192 \u0424\u0443\u043d\u043a\u0446\u0438\u044f: {pc_func}"
             ))
         ret_val.append(('info', f"LR (return address): 0x{lr:08X}"))
-        lr_func = self.resolve_pc_to_function(lr & ~1)  # clear Thumb bit
-        if lr_func:
-            ret_val.append((
-                'info',
-                f"  \u2192 \u0412\u044b\u0437\u0432\u0430\u043d\u0430 \u0438\u0437: {lr_func}"
-            ))
+        exc_return = self.decode_exc_return(lr)
+        if exc_return:
+            ret_val.append(('info', f"  \u2192 EXC_RETURN: {exc_return}"))
+        else:
+            lr_func = self.resolve_pc_to_function(lr & ~1)  # clear Thumb bit
+            if lr_func:
+                ret_val.append((
+                    'info',
+                    f"  \u2192 \u0412\u044b\u0437\u0432\u0430\u043d\u0430 \u0438\u0437: {lr_func}"
+                ))
         ret_val.append(('info', ""))
 
 #----------------------------------------------------------------------
-# Анализ значений регистров R0-R3, R12
+# Анализ значений регистров R0-R3, R12, SP
 #----------------------------------------------------------------------
         bfar_val    = registers['BFAR']
         mmfar_val   = registers['MMFAR']
         bfar_valid  = bool((cfsr >> 8) & (1 << 7))  # BFARVALID  (BFSR bit 7)
         mmfar_valid = bool(cfsr & (1 << 7))          # MMARVALID  (MMFSR bit 7)
 
-        ret_val.append(('info', "=== Анализ регистров R0-R3, R12 ==="))
+        ret_val.append(('info', "=== Анализ регистров R0-R3, R12, SP ==="))
         for reg in ('R0', 'R1', 'R2', 'R3', 'R12'):
             val = registers[reg]
             notes = []
@@ -1378,6 +1438,21 @@ class ARMFaultAnalyzer:
             sev = 'error'   if ('BFAR' in note_str or 'MMFAR' in note_str) else \
                   'warning' if 'NULL' in note_str else 'info'
             ret_val.append((sev, f"  {reg:<3} = 0x{val:08X}  → {note_str}"))
+
+        # SP — отдельно, с проверкой выравнивания и диапазона
+        sp = registers.get('SP', 0)
+        sp_notes = [self.identify_memory_region(sp)]
+        sp_sev = 'info'
+        if sp & 3:
+            sp_notes.append("ВНИМАНИЕ: SP не выровнен по 4 байтам!")
+            sp_sev = 'error'
+        elif sp & 7:
+            sp_notes.append("SP не выровнен по 8 байтам (нарушение AAPCS)")
+            sp_sev = 'warning'
+        if not (0x20000000 <= sp <= 0x3FFFFFFF):
+            sp_notes.append("ВНИМАНИЕ: SP вне SRAM региона!")
+            sp_sev = 'error'
+        ret_val.append((sp_sev, f"  SP  = 0x{sp:08X}  → {'  |  '.join(sp_notes)}"))
 
         ret_val.append(('info', ""))
 
@@ -1604,7 +1679,7 @@ class ARMFaultAnalyzer:
 
     def clear_fields(self):
         """Reset all register input fields to their default values."""
-        defaults = {'PSR': '0x01000000'}
+        defaults = {'PSR': '0x01000000', 'SP': '0x20000000'}
         for reg_name, entry in self.reg_entries.items():
             entry.delete(0, tk.END)
             entry.insert(0, defaults.get(reg_name, '0x00000000'))
@@ -1627,26 +1702,7 @@ class ARMFaultAnalyzer:
         if not filename:
             return
 
-        ret_val = None
-        try:
-            with open(filename, 'r') as f:
-                data = json.load(f)
-
-            for reg_name, value in data.items():
-                if reg_name in self.reg_entries:
-                    self.reg_entries[reg_name].delete(0, tk.END)
-                    if isinstance(value, int):
-                        self.reg_entries[reg_name].insert(0, f"0x{value:08X}")
-                    else:
-                        self.reg_entries[reg_name].insert(0, str(value))
-
-            messagebox.showinfo("Успех", "Дамп загружен из файла")
-            ret_val = True
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось загрузить файл:\n{e}")
-            ret_val = False
-
-        return ret_val
+        return self._load_json_file(filename)
 
     def save_results(self):
         """Export the current analysis results to a text file."""
@@ -1687,6 +1743,78 @@ class ARMFaultAnalyzer:
             ret_val = False
 
         return ret_val
+
+    def copy_diagnosis(self):
+        """Copy the diagnosis text to the system clipboard."""
+        text = self.results_text.get(1.0, tk.END)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+
+    def show_recent_json_menu(self):
+        """Display a popup menu with recently used JSON dump files."""
+        recent = self.settings.get('recent_json_files', [])
+        if not recent:
+            messagebox.showinfo("Информация", "Нет недавних файлов дампов")
+            return
+        menu = tk.Menu(self.root, tearoff=0)
+        for path in recent:
+            menu.add_command(
+                label=os.path.basename(path),
+                command=lambda p=path: self._load_json_file(p)
+            )
+        btn = self.recent_json_btn
+        menu.post(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
+
+    def _load_json_file(self, filename):
+        """
+        @brief  Load a JSON fault dump from the specified file path
+
+        @param[in]  filename  Absolute path to the JSON file
+        @return     True on success, False on failure
+        """
+        ret_val = None
+        try:
+            with open(filename, 'r') as f:
+                data = json.load(f)
+            for reg_name, value in data.items():
+                if reg_name in self.reg_entries:
+                    self.reg_entries[reg_name].delete(0, tk.END)
+                    if isinstance(value, int):
+                        self.reg_entries[reg_name].insert(0, f"0x{value:08X}")
+                    else:
+                        self.reg_entries[reg_name].insert(0, str(value))
+            self._add_to_recent_json(filename)
+            messagebox.showinfo("Успех", "Дамп загружен из файла")
+            ret_val = True
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить файл:\n{e}")
+            ret_val = False
+        return ret_val
+
+    def _add_to_recent_map(self, path):
+        """
+        @brief  Add a MAP file path to the recent files list and update the Combobox
+
+        @param[in]  path  Absolute path to the MAP file
+        """
+        recent = self.settings.setdefault('recent_map_files', [])
+        if path in recent:
+            recent.remove(path)
+        recent.insert(0, path)
+        self.settings['recent_map_files'] = recent[:5]
+        self.map_file_combo['values'] = self.settings['recent_map_files']
+
+    def _add_to_recent_json(self, path):
+        """
+        @brief  Add a JSON dump file path to the recent files list
+
+        @param[in]  path  Absolute path to the JSON dump file
+        """
+        recent = self.settings.setdefault('recent_json_files', [])
+        if path in recent:
+            recent.remove(path)
+        recent.insert(0, path)
+        self.settings['recent_json_files'] = recent[:5]
 
 ################################################################################
 #                              Точка входа                                     #
