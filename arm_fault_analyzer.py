@@ -125,6 +125,57 @@ class ARMFaultAnalyzer:
         
         # === ЛЕВАЯ ПАНЕЛЬ ===
 
+        # Основные регистры
+        core_frame = ttk.LabelFrame(left_panel, text="Регистры процессора", padding=10)
+        core_frame.pack(fill=tk.X, pady=5)
+        
+        self.reg_entries = {}
+        core_regs = [
+            ("R0", "0x00000000"),
+            ("R1", "0x00000000"),
+            ("R2", "0x00000000"),
+            ("R3", "0x00000000"),
+            ("R12", "0x00000000"),
+            ("LR", "0x00000000"),
+            ("PC", "0x00000000"),
+            ("PSR", "0x01000000"),
+        ]
+
+        for reg_name, default_val in core_regs:
+            frame = ttk.Frame(core_frame)
+            frame.pack(fill=tk.X, pady=2)
+            ttk.Label(frame, text=f"{reg_name}:", width=6).pack(side=tk.LEFT)
+            entry = ttk.Entry(frame, width=20)
+            entry.insert(0, default_val)
+            entry.pack(side=tk.LEFT, padx=5)
+            self.reg_entries[reg_name] = entry
+        
+        # Fault Status регистры
+        fault_frame = ttk.LabelFrame(left_panel, text="Fault Status Registers", padding=10)
+        fault_frame.pack(fill=tk.X, pady=5)
+        
+        fault_regs = [
+            ("CFSR", "0x00000000", "Configurable Fault Status"),
+            ("HFSR", "0x00000000", "HardFault Status"),
+            ("DFSR", "0x00000000", "Debug Fault Status"),
+            ("AFSR", "0x00000000", "Auxiliary Fault Status"),
+            ("BFAR", "0x00000000", "BusFault Address"),
+            ("MMFAR", "0x00000000", "MemManage Fault Address"),
+        ]
+        
+        for reg_name, default_val, tooltip in fault_regs:
+            frame = ttk.Frame(fault_frame)
+            frame.pack(fill=tk.X, pady=2)
+            ttk.Label(frame, text=f"{reg_name}:", width=8).pack(side=tk.LEFT)
+            entry = ttk.Entry(frame, width=18)
+            entry.insert(0, default_val)
+            entry.pack(side=tk.LEFT, padx=5)
+            self.reg_entries[reg_name] = entry
+            
+            # Tooltip
+            label = ttk.Label(frame, text="?", foreground="blue", cursor="hand2")
+            label.pack(side=tk.LEFT)
+            self.create_tooltip(label, tooltip)
         # Кнопки управления
         btn_frame = ttk.Frame(left_panel)
         btn_frame.pack(fill=tk.X, pady=10)
