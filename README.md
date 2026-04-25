@@ -5,13 +5,24 @@ A GUI tool for analyzing fault exceptions on ARM Cortex-M microcontrollers.
 ## Requirements
 
 - Python 3.8+
-- Standard library only (tkinter, json, os, sys, re, subprocess, datetime) ï¿½ no third-party dependencies
+- Standard library only (tkinter, json, os, sys, re, subprocess, datetime) - no third-party dependencies
 
 ## Usage
 
 ```bash
 python arm_fault_analyzer.py
 ```
+
+## Features
+
+- Manual register input or loading from a JSON dump file
+- MAP file support for two formats: **AC6 armlink** and **GNU LD** (auto-detected)
+- PC / LR address resolution to function names via MAP file
+- Register decoding: CFSR (MMFSR / BFSR / UFSR), HFSR, DFSR, AFSR, PSR
+- ISR number decoding in PSR and EXC\_RETURN decoding in LR
+- Analysis of R0–R3, R12, SP: memory region, magic value detection, BFAR/MMFAR match
+- Persistent analysis history across sessions
+- Report export to a text file
 
 ## JSON Dump Format
 
@@ -35,7 +46,23 @@ python arm_fault_analyzer.py
 }
 ```
 
-Not all fields are required ï¿½ missing registers default to `0x00000000`.
+Not all fields are required - missing registers default to `0x00000000`.
+
+## Data Files
+
+| File | Contents |
+|------|----------|
+| `arm_analyzer_config.json` | Application settings, paths, recent file lists, language |
+| `arm_analyzer_history.json` | Analysis history (up to N entries, configurable) |
+
+## Settings
+
+The **Settings** tab allows you to configure:
+
+- Default directory for loading JSON dumps
+- Default directory for saving reports
+
+Full usage guide, register descriptions, and common fault scenarios are available in the **Help** tab inside the application.
 
 ---
 
@@ -43,9 +70,8 @@ Not all fields are required ï¿½ missing registers default to `0x00000000`.
 
 | Version | Date | Changes |
 |---------|------|---------|
-|  |  |  |
-
+| 1.0 | April 2026 | Initial release |
 
 ---
 
-*Document version: 0.3*
+*Document version: 1.0*
