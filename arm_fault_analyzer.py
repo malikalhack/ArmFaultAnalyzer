@@ -17,6 +17,7 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 import sys
+import os
 
 ################################################################################
 #                              Версия приложения                               #
@@ -50,6 +51,9 @@ def validate_py_version() -> bool:
 class ARMFaultAnalyzer:
     """
     @brief  Main GUI class for the ARM Cortex-M fault register analyzer
+
+    @details Provides a complete fault analysis workflow:
+
     """
 
     def __init__(self, root):
@@ -298,7 +302,90 @@ class ARMFaultAnalyzer:
 
     def create_settings_tab(self):
         """Create the settings tab."""
-        pass
+
+        main_frame = ttk.Frame(self.settings_frame, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Заголовок
+        title_label = ttk.Label(
+            main_frame,
+            text="Настройки приложения",
+            font=("Arial", 14, "bold")
+        )
+        title_label.pack(pady=(0, 20))
+
+        # Пути по умолчанию
+        paths_frame = ttk.LabelFrame(
+            main_frame,
+            text="Пути по умолчанию",
+            padding=15
+        )
+        paths_frame.pack(fill=tk.X, pady=10)
+
+        # Путь для загрузки
+        load_frame = ttk.Frame(paths_frame)
+        load_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(
+            load_frame,
+            text="Каталог загрузки дампов:",
+            width=28
+        ).pack(side=tk.LEFT)
+        self.load_path_entry = ttk.Entry(load_frame, width=40)
+        self.load_path_entry.pack(side=tk.LEFT, padx=5)
+        self.load_path_entry.insert(0, self.settings['default_load_path'])
+        ttk.Button(
+            load_frame,
+            text="Обзор...",
+            command=lambda: self.browse_directory(self.load_path_entry)
+        ).pack(side=tk.LEFT)
+
+        # Путь для сохранения
+        save_frame = ttk.Frame(paths_frame)
+        save_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(
+            save_frame,
+            text="Каталог сохранения отчётов:",
+            width=28
+        ).pack(side=tk.LEFT)
+        self.save_path_entry = ttk.Entry(save_frame, width=40)
+        self.save_path_entry.pack(side=tk.LEFT, padx=5)
+        self.save_path_entry.insert(0, self.settings['default_save_path'])
+        ttk.Button(
+            save_frame,
+            text="Обзор...",
+            command=lambda: self.browse_directory(self.save_path_entry)
+        ).pack(side=tk.LEFT)
+
+        # Кнопки управления
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=20)
+
+        ttk.Button(
+            btn_frame,
+            text="Сохранить настройки",
+            command=self.save_settings_ui
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Button(
+            btn_frame,
+            text="Сбросить по умолчанию",
+            command=self.reset_settings
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Информация о конфигурационном файле
+        info_frame = ttk.LabelFrame(main_frame, text="Информация", padding=10)
+        info_frame.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(
+            info_frame,
+            text=f"Файл настроек: {os.path.abspath(self.config_file)}",
+            font=("Consolas", 8),
+            foreground="gray"
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            info_frame,
+            text="Если пути не заданы — используются стандартные диалоги открытия/сохранения.",
+            font=("Arial", 9),
+            foreground="gray"
+        ).pack(anchor=tk.W, pady=(4, 0))
 
     def create_help_tab(self):
         """Create the help tab."""
@@ -583,6 +670,38 @@ class ARMFaultAnalyzer:
         # Настройка цветовых тегов
         help_text.tag_config("header", font=("Consolas", 11, "bold"))
 
+    def browse_directory(self, entry_widget):
+        """Выбор каталога"""
+        directory = filedialog.askdirectory(
+            title="Выберите каталог",
+            initialdir=entry_widget.get() if entry_widget.get() else os.getcwd()
+        )
+        if directory:
+            entry_widget.delete(0, tk.END)
+            entry_widget.insert(0, directory)
+
+    def browse_map_file(self):
+        """Выбор MAP файла через диалог и его немедленная загрузка"""
+        initial_dir = self.settings.get('default_load_path', '')
+        if not initial_dir or not os.path.exists(initial_dir):
+            initial_dir = os.getcwd()
+
+        filename = filedialog.askopenfilename(
+            title="Открыть MAP файл",
+            initialdir=initial_dir,
+            filetypes=[("MAP files", "*.map"), ("All files", "*.*")]
+        )
+        if filename:
+            self.map_file_entry.delete(0, tk.END)
+            self.map_file_entry.insert(0, filename)
+            self.load_map_file(filename)
+
+    def clear_map_file(self):
+        """Сброс загруженного MAP файла"""
+        self.map_file_entry.delete(0, tk.END)
+        self.map_symbols = []
+        self.map_status_label.config(text="Файл не загружен", foreground="gray")
+
     def load_settings(self):
         """Load settings from the config file."""
         pass
@@ -601,10 +720,6 @@ class ARMFaultAnalyzer:
 
     def parse_hex_value(self, value_str):
         """Parse a hex string (with or without '0x' prefix) and return an integer."""
-        pass
-
-    def create_settings_tab(self):
-        """Create the settings tab."""
         pass
 
     def identify_memory_region(self, addr):
