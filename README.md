@@ -23,6 +23,7 @@ python arm_fault_analyzer.py
 - Analysis of R0–R3, R12, SP: memory region, magic value detection, BFAR/MMFAR match
 - Persistent analysis history across sessions
 - Report export to a text file
+- One-click copy of diagnostics to clipboard
 
 ## JSON Dump Format
 
@@ -61,6 +62,7 @@ The **Settings** tab allows you to configure:
 
 - Default directory for loading JSON dumps
 - Default directory for saving reports
+- Recent files list size (MAP and JSON)
 
 Full usage guide, register descriptions, and common fault scenarios are available in the **Help** tab inside the application.
 
@@ -70,8 +72,9 @@ Full usage guide, register descriptions, and common fault scenarios are availabl
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1 | April 2026 | Added history saving for JSON and MAP files |
 | 1.0 | April 2026 | Initial release |
 
 ---
 
-*Document version: 1.0*
+*Document version: 1.1*
