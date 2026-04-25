@@ -3,7 +3,7 @@
 """
  ******************************************************************************
  * @file    arm_fault_analyzer.py
- * @version 0.2.0
+ * @version 0.3.0
  * @author  Anton Chernov
  * @date    04/23/2026
  * @brief   ARM Cortex-M Fault Analyzer with GUI
@@ -22,7 +22,7 @@ import sys
 #                              Версия приложения                               #
 ################################################################################
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
 def get_version() -> str:
     """Return the application version string."""
@@ -102,7 +102,55 @@ class ARMFaultAnalyzer:
 
     def create_analysis_tab(self):
         """Create the register analysis tab."""
-        pass
+
+        # Левая панель - ввод регистров
+        left_panel = ttk.Frame(self.analysis_frame)
+        left_panel.pack(
+            side=tk.LEFT,
+            fill=tk.BOTH,
+            expand=False,
+            padx=5,
+            pady=5
+        )
+        
+        # Правая панель - результаты
+        right_panel = ttk.Frame(self.analysis_frame)
+        right_panel.pack(
+            side=tk.RIGHT,
+            fill=tk.BOTH,
+            expand=True,
+            padx=5,
+            pady=5
+        )
+        
+        # === ЛЕВАЯ ПАНЕЛЬ ===
+
+        # Кнопки управления
+        btn_frame = ttk.Frame(left_panel)
+        btn_frame.pack(fill=tk.X, pady=10)
+
+        ttk.Button(
+            btn_frame,
+            text="Анализировать",
+            command=self.analyze_fault
+        ).pack(fill=tk.X, pady=2)
+        ttk.Button(
+            btn_frame,
+            text="Очистить",
+            command=self.clear_fields
+        ).pack(fill=tk.X, pady=2)
+        ttk.Button(
+            btn_frame,
+            text="Загрузить из файла",
+            command=self.load_from_file
+        ).pack(fill=tk.X, pady=2)
+        ttk.Button(
+            btn_frame,
+            text="Сохранить результат",
+            command=self.save_results
+        ).pack(fill=tk.X, pady=2)
+
+        # === ПРАВАЯ ПАНЕЛЬ ===
 
     def create_history_tab(self):
         """Create the history tab."""
@@ -415,10 +463,6 @@ class ARMFaultAnalyzer:
         """Parse a hex string (with or without '0x' prefix) and return an integer."""
         pass
 
-    def create_analysis_tab(self):
-        """Create the register analysis tab."""
-        pass
-
     def create_history_tab(self):
         """Create the history tab."""
         pass
@@ -543,6 +587,12 @@ class ARMFaultAnalyzer:
 
     def clear_fields(self):
         """Reset all register input fields to their default values."""
+        pass
+
+    def load_from_file(self):
+        pass
+
+    def save_results(self):
         pass
 
 ################################################################################
