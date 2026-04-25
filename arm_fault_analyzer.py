@@ -3,7 +3,7 @@
 """
  ******************************************************************************
  * @file    arm_fault_analyzer.py
- * @version 0.3.0
+ * @version 0.4.0
  * @author  Anton Chernov
  * @date    04/23/2026
  * @brief   ARM Cortex-M Fault Analyzer with GUI
@@ -19,12 +19,13 @@ from tkinter import ttk, scrolledtext, messagebox, filedialog
 import json
 import sys
 import os
+from datetime import datetime
 
 ################################################################################
 #                              Версия приложения                               #
 ################################################################################
 
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 
 def get_version() -> str:
     """Return the application version string."""
@@ -54,7 +55,11 @@ class ARMFaultAnalyzer:
     @brief  Main GUI class for the ARM Cortex-M fault register analyzer
 
     @details Provides a complete fault analysis workflow:
-
+             - Manual register input or loading from a JSON dump file
+             - Bit-field decoding of CFSR, HFSR, DFSR, AFSR, PSR
+             - Fault cause interpretation with remediation recommendations
+             - Analysis history with save/restore support
+             - Configurable default paths for file dialogs
     """
 
     def __init__(self, root):
@@ -773,6 +778,29 @@ class ARMFaultAnalyzer:
             ret_val = 0
         return ret_val
 
+    def resolve_pc_to_function(self, pc):
+        """
+        @brief  Find the function name for a given PC address via binary search
+
+        @details Returns the name of the function whose start address is the
+                 largest address that is <= pc (i.e., pc falls inside that function).
+
+        @param[in]  pc  Program Counter value (32-bit address)
+        @return     Function name string, or None if not found / table empty
+        """
+        ret_val = None
+        if self.map_symbols:
+            lo, hi = 0, len(self.map_symbols) - 1
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                if self.map_symbols[mid][0] <= pc:
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+            if hi >= 0:
+                ret_val = self.map_symbols[hi][1]
+        return ret_val
+
     def identify_memory_region(self, addr):
         """
         @brief  Identify the ARM Cortex-M memory region for a given address
@@ -784,7 +812,38 @@ class ARMFaultAnalyzer:
         @param[in]  addr  32-bit address to identify
         @return     Human-readable region string
         """
-        pass
+        # ARM Cortex-M generic zones
+        REGIONS = [
+            (0x00000000, 0x1FFFFFFF, "Code region (Flash/ROM)"),
+            (0x20000000, 0x3FFFFFFF, "SRAM region"),
+            (0x40000000, 0x4FFFFFFF, "Peripheral region"),
+            (0x60000000, 0x9FFFFFFF, "External RAM region"),
+            (0xA0000000, 0xDFFFFFFF, "External Device region"),
+            (0xE0000000, 0xFFFFFFFF, "System region (SCS/DWT/ITM)"),
+        ]
+        # STM32 APB/AHB sub-zones (common across most families)
+        STM32_ZONES = [
+            (0x40000000, 0x40007FFF, "STM32 APB1"),
+            (0x40010000, 0x40017FFF, "STM32 APB2"),
+            (0x40020000, 0x4007FFFF, "STM32 AHB1 / APB3"),
+            (0x50000000, 0x5FFFFFFF, "STM32 AHB2/3 (GPIO/USB/SDMMC)"),
+            (0xE0001000, 0xE0001FFF, "DWT (Data Watchpoint)"),
+            (0xE0002000, 0xE0002FFF, "FPB (Flash Patch)"),
+            (0xE000E000, 0xE000EFFF, "SCS (NVIC/SCB/SysTick)"),
+            (0xE0040000, 0xE00FFFFF, "TPIU/ETM/CoreSight"),
+        ]
+        ret_val = "Unknown region"
+        # Check STM32 sub-zones first (more specific)
+        for start, end, name in STM32_ZONES:
+            if start <= addr <= end:
+                ret_val = name
+                break
+        else:
+            for start, end, name in REGIONS:
+                if start <= addr <= end:
+                    ret_val = name
+                    break
+        return ret_val
 
     def identify_magic_value(self, val):
         """
@@ -842,7 +901,71 @@ class ARMFaultAnalyzer:
         @param[in]  cfsr_value  CFSR register value (32-bit)
         @return     List of strings with decoded fault flags
         """
-        pass
+        ret_val = []
+
+        # MMFSR (bits 0-7) - MemManage Fault Status Register
+        mmfsr = cfsr_value & 0xFF
+        ret_val.append("=== MMFSR (MemManage Fault) ===")
+
+        if mmfsr & (1 << 0):
+            ret_val.append("  [!] IACCVIOL: Instruction access violation")
+        if mmfsr & (1 << 1):
+            ret_val.append("  [!] DACCVIOL: Data access violation")
+        if mmfsr & (1 << 3):
+            ret_val.append("  [!] MUNSTKERR: MemManage fault on unstacking")
+        if mmfsr & (1 << 4):
+            ret_val.append("  [!] MSTKERR: MemManage fault on stacking")
+        if mmfsr & (1 << 5):
+            ret_val.append("  [!] MLSPERR: MemManage fault during FP lazy state preservation")
+        if mmfsr & (1 << 7):
+            ret_val.append("  [!] MMARVALID: MMFAR contains valid address")
+
+        if mmfsr == 0:
+            ret_val.append("  [OK] No MemManage faults")
+
+        # BFSR (bits 8-15) - BusFault Status Register
+        bfsr = (cfsr_value >> 8) & 0xFF
+        ret_val.append("\n=== BFSR (BusFault) ===")
+
+        if bfsr & (1 << 0):
+            ret_val.append("  [!] IBUSERR: Instruction bus error")
+        if bfsr & (1 << 1):
+            ret_val.append("  [!] PRECISERR: Precise data bus error")
+        if bfsr & (1 << 2):
+            ret_val.append("  [!] IMPRECISERR: Imprecise data bus error")
+        if bfsr & (1 << 3):
+            ret_val.append("  [!] UNSTKERR: BusFault on unstacking")
+        if bfsr & (1 << 4):
+            ret_val.append("  [!] STKERR: BusFault on stacking")
+        if bfsr & (1 << 5):
+            ret_val.append("  [!] LSPERR: BusFault during FP lazy state preservation")
+        if bfsr & (1 << 7):
+            ret_val.append("  [!] BFARVALID: BFAR contains valid address")
+
+        if bfsr == 0:
+            ret_val.append("  [OK] No BusFaults")
+
+        # UFSR (bits 16-31) - UsageFault Status Register
+        ufsr = (cfsr_value >> 16) & 0xFFFF
+        ret_val.append("\n=== UFSR (UsageFault) ===")
+
+        if ufsr & (1 << 0):
+            ret_val.append("  [!] UNDEFINSTR: Undefined instruction")
+        if ufsr & (1 << 1):
+            ret_val.append("  [!] INVSTATE: Invalid state (e.g., Thumb bit not set)")
+        if ufsr & (1 << 2):
+            ret_val.append("  [!] INVPC: Invalid PC load")
+        if ufsr & (1 << 3):
+            ret_val.append("  [!] NOCP: No coprocessor")
+        if ufsr & (1 << 8):
+            ret_val.append("  [!] UNALIGNED: Unaligned access")
+        if ufsr & (1 << 9):
+            ret_val.append("  [!] DIVBYZERO: Division by zero")
+
+        if ufsr == 0:
+            ret_val.append("  [OK] No UsageFaults")
+
+        return ret_val
 
 #-------------------------------------------------------------------------------
 
@@ -860,7 +983,20 @@ class ARMFaultAnalyzer:
                                 Bit 31: DEBUGEVT - debug event
         @return     List of strings with decoded fault flags
         """
-        pass
+        ret_val = []
+        ret_val.append("=== HFSR (HardFault Status) ===")
+
+        if hfsr_value & (1 << 1):
+            ret_val.append("  [!] VECTTBL: BusFault on vector table read")
+        if hfsr_value & (1 << 30):
+            ret_val.append("  [!] FORCED: Forced HardFault (escalated from other fault)")
+        if hfsr_value & (1 << 31):
+            ret_val.append("  [!] DEBUGEVT: Debug event")
+
+        if hfsr_value == 0:
+            ret_val.append("  [OK] No HardFault")
+
+        return ret_val
 
 #-------------------------------------------------------------------------------
 
@@ -874,7 +1010,24 @@ class ARMFaultAnalyzer:
         @param[in]  dfsr_value  DFSR register value (32-bit)
         @return     List of strings with decoded fault flags
         """
-        pass
+        ret_val = []
+        ret_val.append("=== DFSR (Debug Fault Status) ===")
+
+        if dfsr_value & (1 << 0):
+            ret_val.append("  [!] HALTED: Halt request")
+        if dfsr_value & (1 << 1):
+            ret_val.append("  [!] BKPT: Breakpoint")
+        if dfsr_value & (1 << 2):
+            ret_val.append("  [!] DWTTRAP: DWT match")
+        if dfsr_value & (1 << 3):
+            ret_val.append("  [!] VCATCH: Vector catch triggered")
+        if dfsr_value & (1 << 4):
+            ret_val.append("  [!] EXTERNAL: External debug request")
+
+        if dfsr_value == 0:
+            ret_val.append("  [OK] No debug faults")
+
+        return ret_val
 
 #-------------------------------------------------------------------------------
 
@@ -888,7 +1041,16 @@ class ARMFaultAnalyzer:
         @param[in]  afsr_value  AFSR register value (32-bit)
         @return     List of strings with decoded fault flags
         """
-        pass
+        ret_val = []
+        ret_val.append("=== AFSR (Auxiliary Fault Status) ===")
+
+        if afsr_value == 0:
+            ret_val.append("  [OK] No auxiliary faults")
+        else:
+            ret_val.append(f"  Implementation defined value: 0x{afsr_value:08X}")
+            ret_val.append("  [INFO] Interpretation depends on MCU vendor")
+
+        return ret_val
 
 #-------------------------------------------------------------------------------
 
@@ -904,7 +1066,28 @@ class ARMFaultAnalyzer:
         @param[in]  psr_value  PSR register value (32-bit)
         @return     List of strings with decoded flags
         """
-        pass
+        ret_val = []
+        ret_val.append("=== PSR (Program Status Register) ===")
+
+        # APSR флаги
+        ret_val.append("  APSR flags:")
+        ret_val.append(f"    N (Negative): {(psr_value >> 31) & 1}")
+        ret_val.append(f"    Z (Zero): {(psr_value >> 30) & 1}")
+        ret_val.append(f"    C (Carry): {(psr_value >> 29) & 1}")
+        ret_val.append(f"    V (Overflow): {(psr_value >> 28) & 1}")
+        ret_val.append(f"    Q (Saturation): {(psr_value >> 27) & 1}")
+
+        # ISR number
+        isr_num = psr_value & 0x1FF
+        ret_val.append(f"  Exception number: {isr_num}")
+
+        # Thumb state
+        thumb = (psr_value >> 24) & 1
+        ret_val.append(f"  T (Thumb state): {thumb}")
+        if thumb == 0:
+            ret_val.append("    [!] WARNING: Thumb bit not set!")
+
+        return ret_val
 
 #===============================================================================
 # Основная функция анализа
@@ -939,16 +1122,66 @@ class ARMFaultAnalyzer:
 
         # CFSR (Configurable Fault Status Register)
         cfsr_decoded = self.decode_cfsr(registers['CFSR'])
+        for line in cfsr_decoded:
+            if '[!]' in line:
+                self.decode_text.insert(tk.END, line + '\n', 'error')
+            elif '[OK]' in line:
+                self.decode_text.insert(tk.END, line + '\n', 'ok')
+            else:
+                self.decode_text.insert(tk.END, line + '\n')
+
+        self.decode_text.insert(tk.END, '\n')
+
         # HFSR
         hfsr_decoded = self.decode_hfsr(registers['HFSR'])
+        for line in hfsr_decoded:
+            if '[!]' in line:
+                self.decode_text.insert(tk.END, line + '\n', 'error')
+            elif '[OK]' in line:
+                self.decode_text.insert(tk.END, line + '\n', 'ok')
+            else:
+                self.decode_text.insert(tk.END, line + '\n')
+
+        self.decode_text.insert(tk.END, '\n')
+
         # DFSR
         dfsr_decoded = self.decode_dfsr(registers['DFSR'])
+        for line in dfsr_decoded:
+            if '[!]' in line:
+                self.decode_text.insert(tk.END, line + '\n', 'warning')
+            elif '[OK]' in line:
+                self.decode_text.insert(tk.END, line + '\n', 'ok')
+            else:
+                self.decode_text.insert(tk.END, line + '\n')
+
+        self.decode_text.insert(tk.END, '\n')
+
         # AFSR
         afsr_decoded = self.decode_afsr(registers['AFSR'])
+        for line in afsr_decoded:
+            if '[!]' in line:
+                self.decode_text.insert(tk.END, line + '\n', 'error')
+            elif '[OK]' in line:
+                self.decode_text.insert(tk.END, line + '\n', 'ok')
+            else:
+                self.decode_text.insert(tk.END, line + '\n', 'info')
+
+        self.decode_text.insert(tk.END, '\n')
+
         # PSR
         psr_decoded = self.decode_psr(registers['PSR'])
+        for line in psr_decoded:
+            if '[!]' in line or 'WARNING' in line:
+                self.decode_text.insert(tk.END, line + '\n', 'warning')
+            else:
+                self.decode_text.insert(tk.END, line + '\n', 'info')
+
         # === ДИАГНОСТИКА ===
         diagnosis = self.diagnose_fault(registers)
+
+        for severity, message in diagnosis:
+            self.results_text.insert(tk.END, f"{message}\n", severity)
+
         # Сохранение в историю
         self.save_to_history(
             registers,
@@ -965,15 +1198,240 @@ class ARMFaultAnalyzer:
     def diagnose_fault(self, registers):
         """
         @brief  Diagnose fault cause and provide remediation recommendations
+
+        @details Analyses bit-fields of fault registers and determines:
+                 - Fault type (HardFault / MemManage / BusFault / UsageFault)
+                 - Root cause of the fault
+                 - Addresses of faulting instructions / data (PC, BFAR, MMFAR)
+                 - Step-by-step remediation advice
+
+        @param[in]  registers  Dictionary with all register values
+        @return     List of (severity, message) tuples for display
+                    severity: 'error', 'warning', 'info', 'ok'
         """
-        pass
+        ret_val = []
+
+        cfsr = registers['CFSR']
+        hfsr = registers['HFSR']
+        pc = registers['PC']
+        lr = registers['LR']
+
+        ret_val.append(('info', f"PC (адрес ошибки): 0x{pc:08X}"))
+        pc_func = self.resolve_pc_to_function(pc)
+        if pc_func:
+            ret_val.append((
+                'info',
+                f"  \u2192 \u0424\u0443\u043d\u043a\u0446\u0438\u044f: {pc_func}"
+            ))
+        ret_val.append(('info', f"LR (return address): 0x{lr:08X}"))
+        lr_func = self.resolve_pc_to_function(lr & ~1)  # clear Thumb bit
+        if lr_func:
+            ret_val.append((
+                'info',
+                f"  \u2192 \u0412\u044b\u0437\u0432\u0430\u043d\u0430 \u0438\u0437: {lr_func}"
+            ))
+        ret_val.append(('info', ""))
+
+#----------------------------------------------------------------------
+# Анализ значений регистров R0-R3, R12
+#----------------------------------------------------------------------
+        bfar_val    = registers['BFAR']
+        mmfar_val   = registers['MMFAR']
+        bfar_valid  = bool((cfsr >> 8) & (1 << 7))  # BFARVALID  (BFSR bit 7)
+        mmfar_valid = bool(cfsr & (1 << 7))          # MMARVALID  (MMFSR bit 7)
+
+        ret_val.append(('info', "=== Анализ регистров R0-R3, R12 ==="))
+        for reg in ('R0', 'R1', 'R2', 'R3', 'R12'):
+            val = registers[reg]
+            notes = []
+            notes.append(self.identify_memory_region(val))
+            magic = self.identify_magic_value(val)
+            if magic:
+                notes.append(magic)
+            if bfar_valid and val == bfar_val:
+                notes.append("← совпадает с BFAR (адрес нарушения шины!)")
+            if mmfar_valid and val == mmfar_val:
+                notes.append("← совпадает с MMFAR (адрес нарушения MPU!)")
+            sym = self.resolve_pc_to_function(val)
+            if sym and (0x08000000 <= val <= 0x1FFFFFFF):
+                notes.append(f"~ {sym}")
+            note_str = "  |  ".join(notes)
+            sev = 'error'   if ('BFAR' in note_str or 'MMFAR' in note_str) else \
+                  'warning' if 'NULL' in note_str else 'info'
+            ret_val.append((sev, f"  {reg:<3} = 0x{val:08X}  → {note_str}"))
+
+        ret_val.append(('info', ""))
+
+        # Извлечение битовых полей из CFSR
+        mmfsr = cfsr & 0xFF           # [7:0]   MemManage Fault Status
+        bfsr = (cfsr >> 8) & 0xFF     # [15:8]  BusFault Status
+        ufsr = (cfsr >> 16) & 0xFFFF  # [31:16] UsageFault Status
+
+        # Проверка HardFault escalation
+        if hfsr & (1 << 30):
+            ret_val.append(('error', "КРИТИЧНО: Forced HardFault"))
+            ret_val.append(('warning', "  → HardFault возник из-за эскалации другого fault"))
+            ret_val.append(('info', "  → Причина указана в разделе MemManage/BusFault/UsageFault ниже"))
+
+#-------------------------------------------------------------------------------
+# MemManage Fault Analysis
+#-------------------------------------------------------------------------------
+        if mmfsr != 0:
+            ret_val.append(('error', "\n[MemManage Fault обнаружен]"))
+
+            if mmfsr & (1 << 0):  # IACCVIOL
+                ret_val.append(('warning', "  Причина: Попытка выполнить код из защищенной области памяти"))
+                ret_val.append(('info', f"  Решение: Проверьте MPU конфигурацию и адрес PC=0x{pc:08X}"))
+
+            if mmfsr & (1 << 1):  # DACCVIOL
+                ret_val.append(('warning', "  Причина: Попытка доступа к данным в защищенной области"))
+                if mmfsr & (1 << 7):  # MMARVALID
+                    ret_val.append(('info', f"  Адрес нарушения: 0x{registers['MMFAR']:08X} (см. MMFAR)"))
+                ret_val.append(('info', "  Решение: Проверьте настройки MPU и указатели"))
+
+            if mmfsr & ((1 << 3) | (1 << 4)):
+                ret_val.append(('warning', "  Причина: Ошибка при stacking/unstacking (переполнение стека?)"))
+                ret_val.append(('info', "  Решение: Увеличьте размер стека или проверьте рекурсию"))
+
+#-------------------------------------------------------------------------------
+# BusFault Analysis
+#-------------------------------------------------------------------------------
+        if bfsr != 0:
+            ret_val.append(('error', "\n[BusFault обнаружен]"))
+
+            if bfsr & (1 << 0):  # IBUSERR
+                ret_val.append((
+                    'warning',
+                    "  Причина: Попытка чтения инструкции из недоступного адреса"
+                ))
+                ret_val.append(('info', f"  PC указывает на: 0x{pc:08X}"))
+                ret_val.append((
+                    'info',
+                    "  Решение: Проверьте, что PC указывает на валидную Flash память"
+                ))
+
+            if bfsr & (1 << 1):  # PRECISERR
+                ret_val.append((
+                    'warning',
+                    "  Причина: Precise data bus error - доступ к невалидному адресу"
+                ))
+                if bfsr & (1 << 7):  # BFARVALID
+                    ret_val.append((
+                        'info',
+                        f"  Адрес нарушения: 0x{registers['BFAR']:08X} (см. BFAR)"
+                    ))
+                ret_val.append((
+                    'info',
+                    "  Решение: Проверьте указатели, периферию, выравнивание"
+                ))
+
+            if bfsr & (1 << 2):  # IMPRECISERR
+                ret_val.append((
+                    'warning',
+                    "  Причина: Imprecise data bus error"
+                ))
+                ret_val.append((
+                    'info',
+                    "  Решение: Включите debug режим для точной диагностики"
+                ))
+
+            if bfsr & ((1 << 3) | (1 << 4)):  # UNSTKERR | STKERR
+                ret_val.append((
+                    'warning',
+                    "  Причина: Ошибка bus при работе со стеком"
+                ))
+                ret_val.append((
+                    'info',
+                    "  Решение: Проверьте указатель стека (SP) и размер RAM"
+                ))
+
+#-------------------------------------------------------------------------------
+# UsageFault Analysis
+#-------------------------------------------------------------------------------
+        if ufsr != 0:
+            ret_val.append(('error', "\n[UsageFault обнаружен]"))
+
+            if ufsr & (1 << 0):  # UNDEFINSTR
+                ret_val.append((
+                    'warning',
+                    "  Причина: Попытка выполнить неопределенную инструкцию"
+                ))
+                ret_val.append((
+                    'info',
+                    f"  PC (адрес инструкции): 0x{pc:08X}"
+                ))
+                ret_val.append((
+                    'info',
+                    "  Решение: Проверьте содержимое по адресу PC в дизассемблере"
+                ))
+
+            if ufsr & (1 << 1):
+                ret_val.append((
+                    'warning',
+                    "  Причина: Невалидное состояние процессора (Thumb bit?)"
+                ))
+                ret_val.append((
+                    'info',
+                    "  Решение: Убедитесь что все адреса функций имеют младший бит=1"
+                ))
+
+            if ufsr & (1 << 2):
+                ret_val.append((
+                    'warning',
+                    "  Причина: Попытка загрузить невалидный PC"
+                ))
+                ret_val.append((
+                    'info',
+                    "  Решение: Проверьте таблицу векторов прерываний"
+                ))
+
+            if ufsr & (1 << 8):
+                ret_val.append((
+                    'warning',
+                    "  Причина: Невыровненный доступ к памяти"
+                ))
+                ret_val.append((
+                    'info',
+                    "  Решение: Используйте выровненные структуры или packed атрибут"
+                ))
+
+            if ufsr & (1 << 9):
+                ret_val.append(('warning', "  Причина: Деление на ноль"))
+                ret_val.append((
+                    'info',
+                    f"  Проверьте код в районе PC=0x{pc:08X}"
+                ))
+
+        # Если нет fault флагов
+        if cfsr == 0 and hfsr == 0:
+            ret_val.append(('ok', "Fault flags не установлены"))
+            ret_val.append((
+                'info',
+                "Возможно, это не fault или регистры уже сброшены"
+            ))
+
+        return ret_val
 
     def save_to_history(
         self, registers, decoded_cfsr, decoded_hfsr,
         decoded_dfsr, decoded_afsr, decoded_psr, diagnosis
     ):
         """Append the current analysis result to the history list and persist it."""
-        pass
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        history_entry = {
+            'timestamp': timestamp,
+            'registers': registers.copy(),
+            'cfsr_decoded': decoded_cfsr,
+            'hfsr_decoded': decoded_hfsr,
+            'dfsr_decoded': decoded_dfsr,
+            'afsr_decoded': decoded_afsr,
+            'psr_decoded': decoded_psr,
+            'diagnosis': diagnosis
+        }
+
+        self.analysis_history.append(history_entry)
+        self.history_listbox.insert(0, f"{timestamp} - PC=0x{registers['PC']:08X}")
 
     def on_history_select(self, event):
         """Handle item selection in the history list box."""
