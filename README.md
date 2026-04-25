@@ -76,6 +76,11 @@ then add the language code to the Combobox values in `create_settings_tab()`.
 
 Full usage guide, register descriptions, and common fault scenarios are available in the **Help** tab inside the application.
 
+## Interface
+
+![](./Images/analyzer.jpg)
+
+
 ---
 
 ## Changelog
