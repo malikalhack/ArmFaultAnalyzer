@@ -95,7 +95,7 @@ class ARMFaultAnalyzer:
         self.create_history_tab()
         self.create_settings_tab()
         self.create_help_tab()
-        
+
         # История анализов
         self.analysis_history = []
         self.map_symbols = []
@@ -112,7 +112,7 @@ class ARMFaultAnalyzer:
             padx=5,
             pady=5
         )
-        
+
         # Правая панель - результаты
         right_panel = ttk.Frame(self.analysis_frame)
         right_panel.pack(
@@ -122,13 +122,13 @@ class ARMFaultAnalyzer:
             padx=5,
             pady=5
         )
-        
+
         # === ЛЕВАЯ ПАНЕЛЬ ===
 
         # Основные регистры
         core_frame = ttk.LabelFrame(left_panel, text="Регистры процессора", padding=10)
         core_frame.pack(fill=tk.X, pady=5)
-        
+
         self.reg_entries = {}
         core_regs = [
             ("R0", "0x00000000"),
@@ -149,11 +149,11 @@ class ARMFaultAnalyzer:
             entry.insert(0, default_val)
             entry.pack(side=tk.LEFT, padx=5)
             self.reg_entries[reg_name] = entry
-        
+
         # Fault Status регистры
         fault_frame = ttk.LabelFrame(left_panel, text="Fault Status Registers", padding=10)
         fault_frame.pack(fill=tk.X, pady=5)
-        
+
         fault_regs = [
             ("CFSR", "0x00000000", "Configurable Fault Status"),
             ("HFSR", "0x00000000", "HardFault Status"),
@@ -162,7 +162,7 @@ class ARMFaultAnalyzer:
             ("BFAR", "0x00000000", "BusFault Address"),
             ("MMFAR", "0x00000000", "MemManage Fault Address"),
         ]
-        
+
         for reg_name, default_val, tooltip in fault_regs:
             frame = ttk.Frame(fault_frame)
             frame.pack(fill=tk.X, pady=2)
@@ -171,11 +171,12 @@ class ARMFaultAnalyzer:
             entry.insert(0, default_val)
             entry.pack(side=tk.LEFT, padx=5)
             self.reg_entries[reg_name] = entry
-            
+
             # Tooltip
             label = ttk.Label(frame, text="?", foreground="blue", cursor="hand2")
             label.pack(side=tk.LEFT)
             self.create_tooltip(label, tooltip)
+        
         # Кнопки управления
         btn_frame = ttk.Frame(left_panel)
         btn_frame.pack(fill=tk.X, pady=10)
@@ -202,6 +203,60 @@ class ARMFaultAnalyzer:
         ).pack(fill=tk.X, pady=2)
 
         # === ПРАВАЯ ПАНЕЛЬ ===
+
+        # Декодированные флаги
+        decode_frame = ttk.LabelFrame(
+            right_panel,
+            text="Декодированные флаги",
+            padding=5
+        )
+        decode_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        self.decode_text = scrolledtext.ScrolledText(
+            decode_frame,
+            height=26,
+            wrap=tk.WORD,
+            font=("Consolas", 9)
+        )
+        self.decode_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Результаты анализа
+        results_frame = ttk.LabelFrame(
+            right_panel,
+            text="Диагностика",
+            padding=5
+        )
+        results_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        self.results_text = scrolledtext.ScrolledText(
+            results_frame,
+            height=15,
+            wrap=tk.WORD,
+            font=("Consolas", 9)
+        )
+        self.results_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Настройка цветовых тегов
+        self.decode_text.tag_config(
+            "error",
+            foreground="red",
+            font=("Consolas", 9, "bold")
+        )
+        self.decode_text.tag_config("warning", foreground="orange")
+        self.decode_text.tag_config("info", foreground="blue")
+        self.decode_text.tag_config("ok", foreground="green")
+        
+        self.results_text.tag_config(
+            "error",
+            foreground="red",
+            font=("Consolas", 9, "bold")
+        )
+        self.results_text.tag_config(
+            "warning",
+            foreground="orange",
+            font=("Consolas", 9, "bold")
+        )
+        self.results_text.tag_config("info", foreground="blue")
 
     def create_history_tab(self):
         """Create the history tab."""
