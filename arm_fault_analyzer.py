@@ -15,7 +15,7 @@
 
 ################################ Импорт модулей ################################
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, scrolledtext
 import sys
 
 ################################################################################
@@ -90,9 +90,15 @@ class ARMFaultAnalyzer:
         self.help_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.help_frame, text="Помощь")
 
-    def load_settings(self):
-        """Load settings from the config file."""
-        pass
+        # Инициализация UI
+        self.create_analysis_tab()
+        self.create_history_tab()
+        self.create_settings_tab()
+        self.create_help_tab()
+        
+        # История анализов
+        self.analysis_history = []
+        self.map_symbols = []
 
     def create_analysis_tab(self):
         """Create the register analysis tab."""
@@ -108,6 +114,317 @@ class ARMFaultAnalyzer:
 
     def create_help_tab(self):
         """Create the help tab."""
+
+        help_text = scrolledtext.ScrolledText(
+            self.help_frame,
+            wrap=tk.WORD,
+            font=("Consolas", 10),
+            padx=10,
+            pady=10
+        )
+        help_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        help_content = """\
+╔══════════════════════════════════════════════════════════════╗
+║        ARM Cortex-M Fault Analyzer - Руководство             ║
+╚══════════════════════════════════════════════════════════════╝
+
+1. ОБЩЕЕ ОПИСАНИЕ
+   ═══════════════════════════════════════════════════════════
+
+   Инструмент предназначен для анализа системных ошибок (fault)
+   на микроконтроллерах ARM Cortex-M (M0/M0+/M3/M4/M7).
+
+   Поддерживаемые типы fault:
+   • HardFault    - критическая ошибка
+   • MemManage    - нарушение доступа к памяти (MPU)
+   • BusFault     - ошибка шины (невалидный адрес)
+   • UsageFault   - ошибка выполнения инструкции
+   • Debug Fault  - отладочное событие
+
+2. КАК ПОЛУЧИТЬ ЗНАЧЕНИЯ РЕГИСТРОВ
+   ═══════════════════════════════════════════════════════════
+
+   Используйте паттерн naked + C-handler в обработчиках ошибок:
+
+   /* Trampoline macro - checks LR to select MSP or PSP */
+   #define FAULT_TRAMPOLINE() \\
+       __asm volatile( \\
+           "tst  lr, #4              \\n" \\
+           "ite  eq                  \\n" \\
+           "mrseq r0, msp            \\n" /* fault in Thread mode, MSP */ \\
+           "mrsne r0, psp            \\n" /* fault in Handler mode, PSP */ \\
+           "b    Common_Fault_Handler_C \\n" \\
+       )
+
+   /* Naked handlers - no compiler prologue/epilogue, trampoline only */
+   __attribute__((naked)) void HardFault_Handler(void)  { FAULT_TRAMPOLINE(); }
+   __attribute__((naked)) void BusFault_Handler(void)   { FAULT_TRAMPOLINE(); }
+   __attribute__((naked)) void MemManage_Handler(void)  { FAULT_TRAMPOLINE(); }
+
+   /* C-level handler receives the stacked frame as fault_args[] */
+   void Common_Fault_Handler_C(uint32_t *fault_args)
+   {
+       __disable_irq();
+
+       /* Registers saved automatically onto the stack by the CPU */
+       volatile uint32_t stacked_r0  = fault_args[0];
+       volatile uint32_t stacked_r1  = fault_args[1];
+       volatile uint32_t stacked_r2  = fault_args[2];
+       volatile uint32_t stacked_r3  = fault_args[3];
+       volatile uint32_t stacked_r12 = fault_args[4];
+       volatile uint32_t stacked_lr  = fault_args[5];
+       volatile uint32_t stacked_pc  = fault_args[6]; /* address of faulting instruction */
+       volatile uint32_t stacked_psr = fault_args[7];
+
+       /* Fault Status Registers (read before they are cleared) */
+       volatile uint32_t cfsr = SCB->CFSR;  /* 0xE000ED28 - MMFSR/BFSR/UFSR combined */
+       volatile uint32_t hfsr = SCB->HFSR;  /* 0xE000ED2C - bit30 FORCED = escalated  */
+       volatile uint32_t dfsr = SCB->DFSR;  /* 0xE000ED30 - debug fault status         */
+       volatile uint32_t afsr = SCB->AFSR;  /* 0xE000ED3C - implementation defined     */
+       volatile uint32_t bfar = SCB->BFAR;  /* 0xE000ED38 - valid when BFARVALID=1     */
+       volatile uint32_t mmar = SCB->MMFAR; /* 0xE000ED34 - valid when MMARVALID=1     */
+
+       /* Suppress unused-variable warnings in release builds */
+       (void)stacked_r0;  (void)stacked_r1;  (void)stacked_r2;  (void)stacked_r3;
+       (void)stacked_r12; (void)stacked_lr;  (void)stacked_pc;  (void)stacked_psr;
+       (void)cfsr; (void)hfsr; (void)dfsr; (void)afsr; (void)bfar; (void)mmar;
+       /* Set a breakpoint here, then read the volatile vars in the debugger
+          and paste the hex values into the ARM Fault Analyzer. */
+       while (1);
+   }
+
+   ИЛИ используйте отладчик (GDB, J-Link, SEGGER):
+   • Остановитесь на breakpoint в обработчике fault
+   • Считайте регистры через Memory View или команды
+
+3. ПОРЯДОК РАБОТЫ С АНАЛИЗАТОРОМ
+   ═══════════════════════════════════════════════════════════
+
+   Шаг 1: Ввод данных
+   ──────────────────
+   Введите значения регистров вручную в hex формате:
+     R0-R3, R12, LR, PC, PSR   - регистры процессора
+     CFSR, HFSR, DFSR, AFSR    - fault status регистры
+     BFAR, MMFAR               - адреса ошибок
+
+   Или загрузите из JSON файла ("Загрузить из файла").
+
+   Шаг 2: Анализ
+   ─────────────
+   Нажмите кнопку "Анализировать".
+
+   Результаты:
+   • Правая верхняя панель - декодированные флаги регистров
+   • Правая нижняя панель - диагностика с описанием проблемы
+
+   Шаг 3: Интерпретация
+   ────────────────────
+   Диагностика покажет:
+   • Тип fault (MemManage/BusFault/UsageFault/HardFault)
+   • Причину возникновения
+   • Рекомендации по устранению
+   • Адреса проблемных инструкций/данных
+
+4. ФОРМАТ JSON ДАМПА
+   ═══════════════════════════════════════════════════════════
+
+   Пример файла fault_dump.json:
+
+   {
+       "R0": "0x20000100",
+       "R1": "0x00000000",
+       "R2": "0x08001234",
+       "R3": "0xDEADBEEF",
+       "R12": "0x00000000",
+       "LR": "0x08000401",
+       "PC": "0x08002468",
+       "PSR": "0x01000000",
+       "CFSR": "0x00000082",
+       "HFSR": "0x40000000",
+       "DFSR": "0x00000000",
+       "AFSR": "0x00000000",
+       "BFAR": "0x20000100",
+       "MMFAR": "0x00000000"
+   }
+
+5. РАСШИФРОВКА РЕГИСТРОВ
+   ═══════════════════════════════════════════════════════════
+
+   PC (Program Counter)
+   ────────────────────
+   Адрес инструкции, на которой произошла ошибка.
+   Используйте .map файл для определения функции.
+
+   LR (Link Register)
+   ──────────────────
+   Адрес возврата. Может указывать на вызывающую функцию.
+
+   PSR (Program Status Register)
+   ─────────────────────────────
+   • Биты 31-28: флаги N, Z, C, V (арифметика)
+   • Биты 8-0: номер текущего exception
+   • Бит 24: Thumb bit (должен быть 1)
+
+   CFSR (Configurable Fault Status Register)
+   ─────────────────────────────────────────
+   Объединяет три регистра:
+   • MMFSR (биты 7-0)   - MemManage fault
+   • BFSR  (биты 15-8)  - BusFault
+   • UFSR  (биты 31-16) - UsageFault
+
+   HFSR (HardFault Status Register)
+   ────────────────────────────────
+   • Бит 30: FORCED - эскалация из другого fault
+   • Бит 1: VECTTBL - ошибка чтения таблицы векторов
+
+   MMFAR / BFAR
+   ────────────
+   Содержат адрес памяти, вызвавший MemManage или BusFault.
+   Валидны только если установлен флаг MMARVALID/BFARVALID.
+
+6. ТИПОВЫЕ ПРОБЛЕМЫ И РЕШЕНИЯ
+   ═══════════════════════════════════════════════════════════
+
+   Проблема: IBUSERR (Instruction bus error)
+   ─────────────────────────────────────────
+   Причина: PC указывает на невалидный адрес Flash памяти
+   Решение:
+   • Проверьте таблицу векторов прерываний
+   • Убедитесь что PC в диапазоне Flash (0x08000000+)
+   • Проверьте наличие повреждения Flash
+
+   Проблема: PRECISERR (Precise data bus error)
+   ────────────────────────────────────────────
+   Причина: Обращение к невалидному адресу памяти
+   Решение:
+   • Проверьте адрес в BFAR
+   • Проверьте указатели на NULL
+   • Проверьте выход за границы массива
+   • Проверьте адреса периферии
+
+   Проблема: UNDEFINSTR (Undefined instruction)
+   ────────────────────────────────────────────
+   Причина: Попытка выполнить неизвестную инструкцию
+   Решение:
+   • Проверьте содержимое по адресу PC в дизассемблере
+   • Возможно повреждение Flash или ошибочный переход
+
+   Проблема: UNALIGNED (Unaligned access)
+   ──────────────────────────────────────
+   Причина: Невыровненный доступ к памяти
+   Решение:
+   • Используйте __attribute__((packed)) или __packed
+   • Убедитесь что структуры выровнены правильно
+   • Проверьте приведение типов указателей
+
+   Проблема: DIVBYZERO (Division by zero)
+   ───────────────────────────────────────
+   Причина: Деление на ноль (требует включения trap)
+   Решение:
+   • Найдите код деления в районе адреса PC
+   • Добавьте проверку делителя перед делением
+
+   Проблема: MSTKERR/MUNSTKERR (Stack error)
+   ─────────────────────────────────────────
+   Причина: Переполнение стека или MPU защита
+   Решение:
+   • Увеличьте размер стека в linker script
+   • Проверьте рекурсивные вызовы
+   • Проверьте большие локальные переменные
+   • Проверьте настройки MPU
+
+7. ДОПОЛНИТЕЛЬНЫЕ ВОЗМОЖНОСТИ
+   ═══════════════════════════════════════════════════════════
+
+   История анализов
+   ────────────────
+   Все выполненные анализы сохраняются во вкладке "История".
+   Можно восстановить значения из предыдущего анализа.
+
+   Экспорт результатов
+   ───────────────────
+   Кнопка "Сохранить результат" - экспорт полного отчёта
+   в текстовый файл для документации или отправки коллегам.
+
+   Настройки путей
+   ───────────────
+   Вкладка "Настройки" позволяет задать пути по умолчанию
+   для загрузки дампов и сохранения отчётов.
+
+8. ПОЛЕЗНЫЕ ССЫЛКИ
+   ═══════════════════════════════════════════════════════════
+
+   • ARM Cortex-M Programming Guide:
+     https://developer.arm.com/documentation/
+
+   • Exception and Fault Handling:
+     ARM DDI 0403E (ARMv7-M Architecture Reference Manual)
+
+   • Fault Status Registers:
+     https://developer.arm.com/documentation/100165/
+
+9. СОВЕТЫ ПО ОТЛАДКЕ
+   ═══════════════════════════════════════════════════════════
+
+   1. Всегда проверяйте PC - это адрес проблемной инструкции
+
+   2. Используйте .map файл или objdump для определения функции:
+      arm-none-eabi-objdump -d firmware.elf | grep <PC_address>
+
+   3. При FORCED HardFault смотрите CFSR - там реальная причина
+
+   4. BFAR и MMFAR валидны только если установлены флаги
+      BFARVALID и MMARVALID соответственно
+
+   5. Включите UsageFault, BusFault, MemManage в SCB->SHCSR:
+      SCB->SHCSR |= (SCB_SHCSR_USGFAULTENA_Msk |
+                     SCB_SHCSR_BUSFAULTENA_Msk |
+                     SCB_SHCSR_MEMFAULTENA_Msk);
+
+   6. Для более точной диагностики BusFault используйте
+      precise mode (отключите write buffering если нужно)
+
+══════════════════════════════════════════════════════════════
+                    (C) 2026 ARM Fault Analyzer
+══════════════════════════════════════════════════════════════
+"""
+        help_text.insert(1.0, help_content)
+        help_text.config(state=tk.DISABLED)  # Только чтение
+
+        # Настройка цветовых тегов
+        help_text.tag_config("header", font=("Consolas", 11, "bold"))
+
+    def load_settings(self):
+        """Load settings from the config file."""
+        pass
+
+    def save_settings_ui(self):
+        """Read settings from the UI controls and save them to the config file."""
+        pass
+
+    def reset_settings(self):
+        """Reset all settings to their default values."""
+        pass
+
+    def create_tooltip(self, widget, text):
+        """Attach a hover tooltip to a widget."""
+        pass
+
+    def parse_hex_value(self, value_str):
+        """Parse a hex string (with or without '0x' prefix) and return an integer."""
+        pass
+
+    def create_analysis_tab(self):
+        """Create the register analysis tab."""
+        pass
+
+    def create_history_tab(self):
+        """Create the history tab."""
+        pass
+
+    def create_settings_tab(self):
+        """Create the settings tab."""
         pass
 
     def identify_memory_region(self, addr):
@@ -214,6 +531,18 @@ class ARMFaultAnalyzer:
         """
         @brief  Diagnose fault cause and provide remediation recommendations
         """
+        pass
+
+    def restore_from_history(self):
+        """Restore register values from the selected history entry."""
+        pass
+
+    def clear_history(self):
+        """Clear all analysis history entries."""
+        pass
+
+    def clear_fields(self):
+        """Reset all register input fields to their default values."""
         pass
 
 ################################################################################
