@@ -84,12 +84,42 @@ Full usage guide, register descriptions, and common fault scenarios are availabl
 
 ## Changelog
 
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.2 | April 2026 | Localisation support (ru/en): JSON locale files + help text files, language selector in Settings, auto-restart on language change |
-| 1.1 | April 2026 | Added history saving for JSON and MAP files |
-| 1.0 | April 2026 | Initial release |
+### [1.3] - April 2026
+
+**Fixed**
+- Clearing history now immediately overwrites the history file (previously the file kept old data and history was restored on next launch)
+- Resetting settings now saves the defaults to the config file immediately
+- Information block in Settings now updates live when saving or resetting (previously required a restart to reflect changes)
+
+**Changed**
+- Config and history files moved to `%APPDATA%\ARMFaultAnalyzer\` (Windows) / `~/.config/ARMFaultAnalyzer/` (Linux/macOS) - no longer placed next to the script
+- History file directory is now configurable in Settings tab; defaults to the same folder as the config file
+- Empty load/save path in the Information block now shows the script directory instead of "not set"
+- Version button `v1.x.x` added to the bottom-left corner of the main window (opens About dialog)
+
+**Optimized**
+- History file now stores only register values per entry; decoded fields and diagnosis text (which were never displayed) have been removed - significantly reduces file size
 
 ---
 
-*Document version: 1.2*
+### [1.2] - April 2026
+
+**Changed**
+- Localisation support (ru/en): JSON locale files + help text files, language selector in Settings, auto-restart on language change
+
+---
+
+### [1.1] - April 2026
+
+**Changed**
+- Added history saving for JSON and MAP files
+
+---
+
+### [1.0] - April 2026
+
+- Initial release
+
+---
+
+*Document version: 1.3*

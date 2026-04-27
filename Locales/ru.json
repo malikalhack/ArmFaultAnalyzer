@@ -40,6 +40,12 @@
     "settings_hist_limit":   "Максимум записей истории:",
     "settings_info":         "Информация",
     "settings_config_path":  "Файл настроек: {path}",
+    "settings_hist_dir":      "Каталог файла истории:",
+    "settings_hist_dir_hint": "(пусто — рядом с конфигурацией)",
+    "settings_history_path": "Файл истории: {path}",
+    "settings_load_path_info": "Каталог дампов: {path}",
+    "settings_save_path_info": "Каталог отчётов: {path}",
+    "settings_path_not_set":  "не задан",
     "settings_paths_hint":   "Если пути не заданы — используются стандартные диалоги открытия/сохранения.",
     "settings_language":     "Язык интерфейса:",
     "settings_restart_note": "Изменение языка применяется после перезапуска.",
@@ -52,6 +58,9 @@
     "dlg_reset_confirm":     "Сбросить настройки по умолчанию?",
     "dlg_clear_hist_confirm":"Очистить всю историю?",
     "dlg_restore_confirm":   "Выберите запись из истории",
+
+    "about_title": "О программе",
+    "about_text":  "ARM Cortex-M Fault Analyzer\nВерсия: {version}\n\nАвтор: Anton Chernov\nЛицензия: MIT",
 
     "msg_success":           "Успех",
     "msg_error":             "Ошибка",
