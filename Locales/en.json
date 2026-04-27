@@ -40,6 +40,12 @@
     "settings_hist_limit":   "Maximum history entries:",
     "settings_info":         "Information",
     "settings_config_path":  "Settings file: {path}",
+    "settings_hist_dir":      "History file directory:",
+    "settings_hist_dir_hint": "(empty = same folder as config)",
+    "settings_history_path": "History file: {path}",
+    "settings_load_path_info": "Dump directory: {path}",
+    "settings_save_path_info": "Reports directory: {path}",
+    "settings_path_not_set":  "not set",
     "settings_paths_hint":   "If paths are not set, default open/save dialogs will be used.",
     "settings_language":     "Interface language:",
     "settings_restart_note": "Language change takes effect after restart.",
@@ -52,6 +58,9 @@
     "dlg_reset_confirm":     "Reset settings to defaults?",
     "dlg_clear_hist_confirm":"Clear all history?",
     "dlg_restore_confirm":   "Select a history entry",
+
+    "about_title": "About",
+    "about_text":  "ARM Cortex-M Fault Analyzer\nVersion: {version}\n\nAuthor: Anton Chernov\nLicense: MIT",
 
     "msg_success":           "Success",
     "msg_error":             "Error",

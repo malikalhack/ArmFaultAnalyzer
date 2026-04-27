@@ -3,7 +3,7 @@
 """
  ******************************************************************************
  * @file    arm_fault_analyzer.py
- * @version 1.2.0
+ * @version 1.3.0
  * @author  Anton Chernov
  * @date    04/23/2026
  * @brief   ARM Cortex-M Fault Analyzer with GUI
@@ -44,7 +44,7 @@ from datetime import datetime
 #                              Версия приложения                               #
 ################################################################################
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 
 def get_version() -> str:
     """Return the application version string."""
@@ -116,6 +116,26 @@ class ARMFaultAnalyzer:
              - Configurable default paths for file dialogs
     """
 
+    @staticmethod
+    def _get_app_dir() -> str:
+        """
+        @brief  Return the OS-standard application data directory,
+                creating it on first use.
+
+        @details
+                 - Windows : %APPDATA%\\ARMFaultAnalyzer\\
+                 - Linux / macOS : ~/.config/ARMFaultAnalyzer/
+
+        @return  Absolute path to the application data directory.
+        """
+        if sys.platform == "win32":
+            base = os.environ.get("APPDATA", os.path.expanduser("~"))
+        else:
+            base = os.path.join(os.path.expanduser("~"), ".config")
+        app_dir = os.path.join(base, "ARMFaultAnalyzer")
+        os.makedirs(app_dir, exist_ok=True)
+        return app_dir
+
     def __init__(self, root):
         """
         @brief  Initialize the main application window
@@ -126,11 +146,15 @@ class ARMFaultAnalyzer:
         self.root.title("ARM Cortex-M Fault Analyzer")
         self.root.geometry("1100x870")
 
+        # Конфигурационный файл — всегда в каталоге данных приложения
+        _app_dir = self._get_app_dir()
+        self.config_file = os.path.join(_app_dir, "arm_analyzer_config.json")
+
         # Настройки по умолчанию
-        self.config_file = "arm_analyzer_config.json"
         self.settings = {
             'default_load_path': '',
             'default_save_path': '',
+            'history_dir': '',          # '' → тот же каталог, что и конфиг
             'recent_map_files': [],
             'recent_json_files': [],
             'recent_files_limit': 5,
@@ -139,10 +163,26 @@ class ARMFaultAnalyzer:
         }
         self.load_settings()
 
+        # Вычисляем путь к файлу истории заранее (нужен в create_settings_tab)
+        history_dir = self.settings.get('history_dir', '').strip()
+        if not history_dir or not os.path.isdir(history_dir):
+            history_dir = os.path.dirname(self.config_file)
+        self.history_file = os.path.join(history_dir, "arm_analyzer_history.json")
+
         # Загрузка локали (язык берётся из конфига, по умолчанию 'ru')
         _load_locale(self.settings.get('language', 'ru'))
 
         self.root.title(t('app_title'))
+
+        # Нижняя полоска с кнопкой версии (pack до notebook, чтобы не было вытеснена)
+        bottom_bar = ttk.Frame(root)
+        bottom_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=(0, 3))
+        ttk.Button(
+            bottom_bar,
+            text=f"v{APP_VERSION}",
+            command=self.show_about,
+            width=8
+        ).pack(side=tk.LEFT)
 
         # Создание вкладок
         self.notebook = ttk.Notebook(root)
@@ -171,10 +211,16 @@ class ARMFaultAnalyzer:
         self.create_help_tab()
 
         # История анализов
-        self.history_file = "arm_analyzer_history.json"
         self.analysis_history = []
         self.map_symbols = []
         self._load_history()
+
+    def show_about(self):
+        """Show the About dialog with version and author information."""
+        messagebox.showinfo(
+            t('about_title'),
+            t('about_text', version=APP_VERSION)
+        )
 
     def create_analysis_tab(self):
         """Create the register analysis tab."""
@@ -487,6 +533,23 @@ class ARMFaultAnalyzer:
             command=lambda: self.browse_directory(self.save_path_entry)
         ).pack(side=tk.LEFT)
 
+        # Каталог файла истории
+        hist_dir_frame = ttk.Frame(paths_frame)
+        hist_dir_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(
+            hist_dir_frame,
+            text=t('settings_hist_dir'),
+            width=28
+        ).pack(side=tk.LEFT)
+        self.hist_dir_entry = ttk.Entry(hist_dir_frame, width=60)
+        self.hist_dir_entry.pack(side=tk.LEFT, padx=5)
+        self.hist_dir_entry.insert(0, self.settings.get('history_dir', ''))
+        ttk.Button(
+            hist_dir_frame,
+            text=t('btn_browse'),
+            command=lambda: self.browse_directory(self.hist_dir_entry)
+        ).pack(side=tk.LEFT)
+
         # Язык интерфейса
         lang_frame = ttk.Frame(paths_frame)
         lang_frame.pack(fill=tk.X, pady=5)
@@ -575,17 +638,49 @@ class ARMFaultAnalyzer:
             info_frame,
             text=t(
                 'settings_config_path',
-                path=os.path.abspath(self.config_file)
+                path=os.path.normpath(os.path.abspath(self.config_file))
             ),
             font=("Consolas", 8),
             foreground="gray"
         ).pack(anchor=tk.W)
         ttk.Label(
             info_frame,
-            text=t('settings_paths_hint'),
-            font=("Arial", 9),
+            text=t(
+                'settings_history_path',
+                path=os.path.normpath(os.path.abspath(self.history_file))
+            ),
+            font=("Consolas", 8),
             foreground="gray"
-        ).pack(anchor=tk.W, pady=(4, 0))
+        ).pack(anchor=tk.W)
+        _script_dir = os.path.dirname(os.path.abspath(__file__))
+        _raw_lp = self.settings.get('default_load_path', '')
+        _load_p = (
+            os.path.normpath(_raw_lp) if _raw_lp
+            else _script_dir
+        )
+        self._info_load_var = tk.StringVar(
+            value=t('settings_load_path_info', path=_load_p)
+        )
+        ttk.Label(
+            info_frame,
+            textvariable=self._info_load_var,
+            font=("Consolas", 8),
+            foreground="gray"
+        ).pack(anchor=tk.W)
+        _raw_sp = self.settings.get('default_save_path', '')
+        _save_p = (
+            os.path.normpath(_raw_sp) if _raw_sp
+            else _script_dir
+        )
+        self._info_save_var = tk.StringVar(
+            value=t('settings_save_path_info', path=_save_p)
+        )
+        ttk.Label(
+            info_frame,
+            textvariable=self._info_save_var,
+            font=("Consolas", 8),
+            foreground="gray"
+        ).pack(anchor=tk.W)
 
     def create_help_tab(self):
         """Create the help tab."""
@@ -627,10 +722,12 @@ class ARMFaultAnalyzer:
         )
         if directory:
             entry_widget.delete(0, tk.END)
-            entry_widget.insert(0, directory)
+            entry_widget.insert(0, os.path.normpath(directory))
 
     def _on_map_combo_select(self, event):
-        """Auto-load the MAP file when an item is selected from the combo box."""
+        """
+        Auto-load the MAP file when an item is selected from the combo box.
+        """
         path = self.map_file_combo.get().strip()
         if path and os.path.exists(path):
             self.load_map_file(path)
@@ -672,10 +769,13 @@ class ARMFaultAnalyzer:
         return ret_val
 
     def save_settings_ui(self):
-        """Read settings from the UI controls and save them to the config file."""
+        """
+        Read settings from the UI controls and save them to the config file.
+        """
         old_lang = self.settings.get('language', 'ru')
         self.settings['default_load_path'] = self.load_path_entry.get()
         self.settings['default_save_path'] = self.save_path_entry.get()
+        self.settings['history_dir'] = self.hist_dir_entry.get().strip()
         self.settings['language'] = self.lang_combo.get()
         try:
             self.settings['recent_files_limit'] = int(self.recent_limit_spin.get())
@@ -695,6 +795,7 @@ class ARMFaultAnalyzer:
                 messagebox.showinfo(t('msg_success'), t('msg_restart_required'))
                 self._restart_app()
             else:
+                self._update_info_labels()
                 messagebox.showinfo(t('msg_success'), t('msg_settings_saved'))
             ret_val = True
         except Exception as e:
@@ -707,13 +808,37 @@ class ARMFaultAnalyzer:
         if messagebox.askyesno(t('dlg_confirm'), t('dlg_reset_confirm')):
             self.load_path_entry.delete(0, tk.END)
             self.save_path_entry.delete(0, tk.END)
+            self.hist_dir_entry.delete(0, tk.END)
             self.settings['default_load_path'] = ''
             self.settings['default_save_path'] = ''
+            self.settings['history_dir'] = ''
             self.recent_limit_spin.set(5)
             self.history_limit_spin.set(50)
             self.settings['recent_files_limit'] = 5
             self.settings['history_limit'] = 50
+            self._update_info_labels()
+            self._autosave_settings()
             messagebox.showinfo(t('msg_success'), t('msg_settings_reset'))
+
+    def _update_info_labels(self):
+        """Refresh the load/save path labels in the Information block."""
+        _script_dir = os.path.dirname(os.path.abspath(__file__))
+        _raw_lp = self.settings.get('default_load_path', '')
+        _load_p = (
+            os.path.normpath(_raw_lp) if _raw_lp
+            else _script_dir
+        )
+        self._info_load_var.set(
+            t('settings_load_path_info', path=_load_p)
+        )
+        _raw_sp = self.settings.get('default_save_path', '')
+        _save_p = (
+            os.path.normpath(_raw_sp) if _raw_sp
+            else _script_dir
+        )
+        self._info_save_var.set(
+            t('settings_save_path_info', path=_save_p)
+        )
 
     def _restart_app(self):
         """
@@ -749,7 +874,9 @@ class ARMFaultAnalyzer:
         widget.bind('<Leave>', on_leave)
 
     def parse_hex_value(self, value_str):
-        """Parse a hex string (with or without '0x' prefix) and return an integer."""
+        """
+        Parse a hex string (with or without '0x' prefix) and return an integer.
+        """
         ret_val = None
         try:
             value_str = value_str.strip()
@@ -763,9 +890,11 @@ class ARMFaultAnalyzer:
 
     def load_map_file(self, path):
         """
-        @brief  Parse a MAP file (GNU LD or AC6 armlink) and build a sorted symbol table
+        @brief  Parse a MAP file (GNU LD or AC6 armlink) and build a sorted
+                symbol table
 
-        @details Auto-detects the map format by scanning for format-specific markers:
+        @details Auto-detects the map format by scanning for format-specific
+                 markers:
                  - AC6 armlink : contains 'Image Symbol Table' header;
                                  symbol lines have the form:
                                    <name>  0x<addr>  Thumb Code ...
@@ -1264,15 +1393,7 @@ class ARMFaultAnalyzer:
             self.results_text.insert(tk.END, f"{message}\n", severity)
 
         # Сохранение в историю
-        self.save_to_history(
-            registers,
-            cfsr_decoded,
-            hfsr_decoded,
-            dfsr_decoded,
-            afsr_decoded,
-            psr_decoded,
-            diagnosis
-        )
+        self.save_to_history(registers)
 
     def diagnose_fault(self, registers):
         """
@@ -1458,22 +1579,13 @@ class ARMFaultAnalyzer:
 
         return ret_val
 
-    def save_to_history(
-        self, registers, decoded_cfsr, decoded_hfsr,
-        decoded_dfsr, decoded_afsr, decoded_psr, diagnosis
-    ):
-        """Append the current analysis result to the history list and persist it."""
+    def save_to_history(self, registers):
+        """Append register snapshot to history list and persist it."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         history_entry = {
             'timestamp': timestamp,
             'registers': registers.copy(),
-            'cfsr_decoded': decoded_cfsr,
-            'hfsr_decoded': decoded_hfsr,
-            'dfsr_decoded': decoded_dfsr,
-            'afsr_decoded': decoded_afsr,
-            'psr_decoded': decoded_psr,
-            'diagnosis': diagnosis
         }
 
         self.analysis_history.append(history_entry)
@@ -1492,7 +1604,11 @@ class ARMFaultAnalyzer:
         self.history_text.delete(1.0, tk.END)
 
         # Показ деталей
-        self.history_text.insert(tk.END, t('hist_analysis_from', ts=entry['timestamp']) + "\n\n", 'info')
+        self.history_text.insert(
+            tk.END,
+            t('hist_analysis_from', ts=entry['timestamp']) + "\n\n",
+            'info'
+        )
         self.history_text.insert(tk.END, t('hist_registers') + "\n")
         for reg_name, value in entry['registers'].items():
             self.history_text.insert(tk.END, f"{reg_name}: 0x{value:08X}\n")
@@ -1520,11 +1636,12 @@ class ARMFaultAnalyzer:
         messagebox.showinfo(t('msg_success'), t('msg_restored'))
 
     def clear_history(self):
-        """Clear all analysis history entries."""
+        """Clear all analysis history entries and erase the history file."""
         if messagebox.askyesno(t('dlg_confirm'), t('dlg_clear_hist_confirm')):
             self.analysis_history.clear()
             self.history_listbox.delete(0, tk.END)
             self.history_text.delete(1.0, tk.END)
+            self._save_history()  # перезаписывает файл пустым списком []
 
     def clear_fields(self):
         """Reset all register input fields to their default values."""
@@ -1537,7 +1654,9 @@ class ARMFaultAnalyzer:
         self.results_text.delete(1.0, tk.END)
 
     def load_from_file(self):
-        """Open a file dialog and load a register dump from a JSON or text file."""
+        """
+        Open a file dialog and load a register dump from a JSON or text file.
+        """
         initial_dir = self.settings.get('default_load_path', '')
         if not initial_dir or not os.path.exists(initial_dir):
             initial_dir = os.getcwd()
