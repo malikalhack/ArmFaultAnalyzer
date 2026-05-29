@@ -3,7 +3,7 @@
 """
  ******************************************************************************
  * @file    arm_fault_analyzer.py
- * @version 1.3.0
+ * @version 1.3.1
  * @author  Anton Chernov
  * @date    04/23/2026
  * @brief   ARM Cortex-M Fault Analyzer with GUI
@@ -44,7 +44,7 @@ from datetime import datetime
 #                              Версия приложения                               #
 ################################################################################
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 
 def get_version() -> str:
     """Return the application version string."""
@@ -1034,17 +1034,20 @@ class ARMFaultAnalyzer:
             0xDEADBEEF: "Debug marker (DEADBEEF)",
             0xA5A5A5A5: "Stack fill pattern (Keil/AC6)",
             0xCCCCCCCC: "Stack fill pattern (IAR)",
-            0x55555555: "Stack fill pattern",
             0xFEFEFEFE: "Uninitialised heap marker",
+            0x01010101: "Initial stack frame marker (task never ran)",
+            0x02020202: "Initial stack frame marker (task never ran)",
+            0x03030303: "Initial stack frame marker (task never ran)",
+            0x04040404: "Initial stack frame marker (task never ran)",
+            0x04040404: "Initial stack frame marker (task never ran)",
+            0x05050505: "Initial stack frame marker (task never ran)",
+            0x06060606: "Initial stack frame marker (task never ran)",
+            0x07070707: "Initial stack frame marker (task never ran)",
+            0x08080808: "Initial stack frame marker (task never ran)",
+            0x09090909: "Initial stack frame marker (task never ran)",
             0x10101010: "Initial stack frame marker (task never ran)",
             0x11111111: "Initial stack frame marker (task never ran)",
             0x12121212: "Initial stack frame marker (task never ran)",
-            0x33333333: "Initial stack frame marker (task never ran)",
-            0x44444444: "Initial stack frame marker (task never ran)",
-            0x66666666: "Initial stack frame marker (task never ran)",
-            0x77777777: "Initial stack frame marker (task never ran)",
-            0x88888888: "Initial stack frame marker (task never ran)",
-            0x99999999: "Initial stack frame marker (task never ran)",
             # Ключи IWDG
             0x00005555: "IWDG_KEY_WRITE_ACCESS (0x5555)",
             0x0000CCCC: "IWDG_KEY_ENABLE (0xCCCC)",
